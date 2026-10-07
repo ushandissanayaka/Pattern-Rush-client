@@ -18,6 +18,17 @@ Open the URL printed by Vite (normally `http://localhost:5173`). The Vite `/api`
 
 For a separately hosted production client, set `VITE_REALTIME_URL` to the server WebSocket endpoint, for example `wss://cipher-clash-server.onrender.com/api/realtime`.
 
+## Deploy to Bloxity
+
+The server URLs live in `.env.dev` (dev channel) and `.env.production` (prod channel). Build a ZIP for the channel you are uploading to:
+
+```powershell
+npm run zip:dev    # release/pattern-rush-client-dev.zip  -> wss://prince-creations.dev.host.bloxity.io
+npm run zip:prod   # release/pattern-rush-client-prod.zip -> wss://prince-creations.host.bloxity.io
+```
+
+Upload the ZIP under My Games → the game → Frontend, on the matching Dev or Prod channel. The ZIP has `index.html` at its root.
+
 ## Client layout
 
 - `public/assets/` contains the static HUD SVGs.

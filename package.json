@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "vite build"
+    "build": "vite build",
+    "build:dev": "vite build --mode dev",
+    "zip:dev": "npm run build:dev && node scripts/zip-dist.mjs release/pattern-rush-client-dev.zip",
+    "zip:prod": "npm run build && node scripts/zip-dist.mjs release/pattern-rush-client-prod.zip"
   },
   "dependencies": {
     "three": "^0.160.0"
