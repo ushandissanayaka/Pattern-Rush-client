@@ -1,5 +1,26 @@
 import * as THREE from 'three';
 import { LegionCharacter } from '../bloxity/legion-avatar.js';
+import { sdk, HOSTING_ID } from '../bloxity/legion-sdk.js';
+import { getEmoteClip } from '../bloxity/legion-emotes.js';
+
+// Where the game socket goes. On Boxity every connect asks the matchmaker at play.bloxity.io for
+// a seat and gets a relay endpoint pinned to one pod; the socket never goes to <id>.host.bloxity.io.
+// A page on verity-quiz.dev.play.bloxity.io reaches the dev backend automatically.
+// Local runs (Vite proxy to localhost:3000) and a VITE_REALTIME_URL override skip the matchmaker.
+const LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[::1\]|192\.168\.|10\.)/;
+async function realtimeUrl() {
+  const override = import.meta.env.VITE_REALTIME_URL;
+  const net = sdk()?.net;
+  if (override || LOCAL_HOST.test(location.hostname) || !net) {
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const url = new URL(override || `${protocol}//${location.host}/api/realtime`, location.href);
+    if (url.protocol === 'https:') url.protocol = 'wss:';
+    if (url.protocol === 'http:') url.protocol = 'ws:';
+    return url;
+  }
+  const { endpoint } = await net.resolveEndpoint(HOSTING_ID);
+  return new URL(`${endpoint}/api/realtime`);
+}
 
 function newClientId() {
   if (crypto.randomUUID) return crypto.randomUUID();
@@ -14,14 +35,28 @@ export function createMultiplayer(onMessage) {
   let reconnectTimer = null;
   let retries = 0;                          // reconnect attempts since the last successful connection
 
-  function connect() {
+  let attempted = false;
+
+  function retryLater() {
     if (closed) return;
-    if (socket) window.dispatchEvent(new CustomEvent('cc:network-retry', { detail: { attempt: ++retries } }));
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const endpoint = import.meta.env.VITE_REALTIME_URL || `${protocol}//${location.host}/api/realtime`;
-    const url = new URL(endpoint, location.href);
-    if (url.protocol === 'https:') url.protocol = 'wss:';
-    if (url.protocol === 'http:') url.protocol = 'ws:';
+    reconnectTimer = setTimeout(connect, retryDelay);
+    retryDelay = Math.min(retryDelay * 2, 15000);
+  }
+
+  async function connect() {
+    if (closed) return;
+    if (attempted) window.dispatchEvent(new CustomEvent('cc:network-retry', { detail: { attempt: ++retries } }));
+    attempted = true;
+    let url;
+    try {
+      url = await realtimeUrl();
+    } catch (error) {
+      console.warn('[multiplayer] matchmaker unavailable; retrying.', error.message);
+      window.dispatchEvent(new CustomEvent('cc:network', { detail: { connected: false } }));
+      retryLater();
+      return;
+    }
+    if (closed) return;
     url.searchParams.set('id', clientId);
     const ws = new WebSocket(url);
     socket = ws;
@@ -44,10 +79,7 @@ export function createMultiplayer(onMessage) {
     ws.addEventListener('close', () => {
       if (socket !== ws) return;
       window.dispatchEvent(new CustomEvent('cc:network', { detail: { connected: false } }));
-      if (!closed) {
-        reconnectTimer = setTimeout(connect, retryDelay);
-        retryDelay = Math.min(retryDelay * 2, 15000);
-      }
+      retryLater();   // resolves a fresh endpoint: a pod being replaced closes with 1012
     });
   }
 
@@ -113,6 +145,7 @@ export function createRemotePlayers(scene) {
         heading: 0,
         state: 'idle',
         name: data.name || 'Player',
+        userId: null,
         skinUrl: data.skinUrl,
         equipped: JSON.stringify(data.equipped || {}),
         proportions: JSON.stringify(data.proportions || {})
@@ -149,8 +182,10 @@ export function createRemotePlayers(scene) {
         remote.initialized = true;
       }
     }
+    if (data.userId !== undefined) remote.userId = data.userId || null;   // verified Boxity account id
     if (Number.isFinite(data.heading)) remote.heading = data.heading;
     if (['idle', 'walk', 'airborne'].includes(data.state)) remote.state = data.state;
+    if (remote.state !== 'idle') remote.character.stopEmote();   // an emote stops when the player moves
   }
 
   function handleMessage(message) {
@@ -174,6 +209,10 @@ export function createRemotePlayers(scene) {
         });
         remotePlayers.delete(message.id);
       }
+    } else if (message.type === 'player-emote') {
+      const remote = remotePlayers.get(message.id);
+      if (remote && !message.emoteId) remote.character.stopEmote();
+      else if (remote) getEmoteClip(message.emoteId).then((clip) => clip && remote.character.playEmote(clip));
     } else if (message.type === 'station-updated') {
       stations.set(message.stationId, message);
       window.dispatchEvent(new CustomEvent('cc:stations', { detail: [...stations.values()] }));
@@ -201,6 +240,12 @@ export function createRemotePlayers(scene) {
     handleMessage,
     update,
     getCharacter: (id) => remotePlayers.get(id)?.character || null,
+    // chat messages name the sender by Boxity account id
+    getCharacterByUserId(userId) {
+      if (!userId) return null;
+      for (const remote of remotePlayers.values()) if (remote.userId === userId) return remote.character;
+      return null;
+    },
     setControlFilter(filter) { isControlled = filter; }
   };
 }

@@ -16,18 +16,20 @@ npm run dev
 
 Open the URL printed by Vite (normally `http://localhost:5173`). The Vite `/api` proxy forwards WebSocket connections to the backend on port 3000.
 
-For a separately hosted production client, set `VITE_REALTIME_URL` to the server WebSocket endpoint, for example `wss://cipher-clash-server.onrender.com/api/realtime`.
+On Boxity the client never opens its socket to `verity-quiz.host.bloxity.io`. Every connect calls `Legion.SDK.net.resolveEndpoint('verity-quiz')` and opens `<endpoint>/api/realtime`, a relay at `play.bloxity.io` pinned to one server pod. A failed resolve or a closed socket resolves again with a backoff. Local runs (`localhost`) skip the matchmaker and use the Vite proxy. `VITE_REALTIME_URL` still overrides the socket URL for a server hosted elsewhere (see `netlify.toml`).
 
 ## Deploy to Bloxity
 
-The server URLs live in `.env.dev` (dev channel) and `.env.production` (prod channel). Build a ZIP for the channel you are uploading to:
+Build a ZIP for the channel you are uploading to:
 
 ```powershell
-npm run zip:dev    # release/pattern-rush-client-dev.zip  -> wss://prince-creations.dev.host.bloxity.io
-npm run zip:prod   # release/pattern-rush-client-prod.zip -> wss://prince-creations.host.bloxity.io
+npm run zip:dev    # release/pattern-rush-client-dev.zip  -> verity-quiz.dev.play.bloxity.io (dev backend)
+npm run zip:prod   # release/pattern-rush-client-prod.zip -> verity-quiz.play.bloxity.io (prod backend)
 ```
 
-Upload the ZIP under My Games → the game → Frontend, on the matching Dev or Prod channel. The ZIP has `index.html` at its root.
+Upload the ZIP under My Games → verity-quiz → Frontend, on the matching Dev or Prod channel. The ZIP has `index.html` at its root.
+
+The game slug and hosting id are `verity-quiz` (`src/bloxity/legion-sdk.js`). The client sends `Legion.SDK.auth.getToken()` with `identify` so the server can verify the account, plays Boxity emotes (`src/bloxity/legion-emotes.js`) and relays them, and shows Boxity chat messages as bubbles above each player.
 
 ## Client layout
 

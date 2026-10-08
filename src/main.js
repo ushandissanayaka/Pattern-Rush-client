@@ -8,7 +8,8 @@ import { createPost, lowPowerDevice } from './effects/post.js';
 import { CameraRig, CAMERA_LIMITS } from './controls/camera.js';
 import { initHud } from './ui/hud.js';
 import { LegionCharacter } from './bloxity/legion-avatar.js';
-import { startLegion, onLocalPlayerChanged, getLocalPlayer } from './bloxity/legion-sdk.js';
+import { startLegion, onLocalPlayerChanged, getLocalPlayer, getToken, sdk } from './bloxity/legion-sdk.js';
+import { loadEmotes, getEmoteClip } from './bloxity/legion-emotes.js';
 import { createMatchSystem } from './game/match.js';
 import { createMultiplayer, createRemotePlayers } from './network/multiplayer.js';
 import { loadingStatus, finishLoading } from './ui/loading.js';
@@ -67,8 +68,9 @@ scene.add(me.root);
 const remotePlayers = createRemotePlayers(scene);
 const multiplayer = createMultiplayer(remotePlayers.handleMessage);
 let localIdentity = getLocalPlayer();
+// The token lets the server verify the Boxity account (guests send none).
 window.addEventListener('cc:identify-request', () => {
-  multiplayer.send('identify', { player: localIdentity });
+  multiplayer.send('identify', { player: localIdentity, token: getToken() });
 });
 // No name tag on your own avatar (matches the video: only other players show one).
 onLocalPlayerChanged((p) => {
@@ -76,8 +78,39 @@ onLocalPlayerChanged((p) => {
   me.setSkin(p.skinUrl);
   me.applyEquipped(p.equipped);
   if (p.proportions && p.proportions.height) me.root.scale.set(1, p.proportions.height, 1);
-  multiplayer.send('identify', { player: p });
+  multiplayer.send('identify', { player: p, token: getToken() });
   window.dispatchEvent(new CustomEvent('cc:player', { detail: p }));
+});
+
+// Boxity draws the emote picker and the chat box over the game; we only play / show the results.
+loadEmotes();
+function stopLocalEmote() {
+  if (!me.emote) return;
+  me.stopEmote();
+  multiplayer.send('emote', { emoteId: null });
+}
+sdk()?.player?.onEvent?.((event, data) => {
+  if (event === 'play_emote') {
+    getEmoteClip(data).then((clip) => {
+      if (!clip) return;
+      me.playEmote(clip);
+      multiplayer.send('emote', { emoteId: data });
+    }).catch(() => {});
+  } else if (event === 'respawn_request') {
+    state.checkpoint.copy(WORLD.spawn);
+    respawn();
+  }
+});
+sdk()?.chat?.onMessage?.((m) => {
+  const chat = sdk().chat;
+  // the local avatar has no name tag; other players' bubbles sit just above theirs
+  const character = m.isLocalPlayer ? me : remotePlayers.getCharacterByUserId(String(m.userId || '').replace(/^legion_/, ''));
+  if (!character) return;
+  chat.attachBubble(THREE, character.root, chat.bubbleText(m), { height: m.isLocalPlayer ? 7 : 8.9, scale: 1.7, seconds: chat.bubbleSeconds });
+});
+// Gems purchases fulfilled by the server's webhook (see Pattern-Rush-Server README)
+addEventListener('cc:multiplayer-message', (e) => {
+  if (e.detail.type === 'gems-grant') window.dispatchEvent(new CustomEvent('cc:gems-grant', { detail: e.detail.grant }));
 });
 
 const rig = new CameraRig(camera, canvas);
@@ -255,6 +288,7 @@ renderer.setAnimationLoop(() => {
   rig.enabled = !match.cameraActive() && document.body.dataset.screen === 'lobby';
   if (!match.locksPlayer()) walk(dt);
   else { vel.set(0, 0, 0); state.grounded = true; state.inputSpeed = 0; }
+  if (state.inputSpeed > 0.5 || !state.grounded || match.ownsAvatar()) stopLocalEmote();
 
   // smooth turning toward the movement heading (Roblox AutoRotate)
   if (!match.ownsAvatar()) {

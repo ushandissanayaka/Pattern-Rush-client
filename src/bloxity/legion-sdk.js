@@ -1,13 +1,13 @@
-// Read-only bridge to the Boxity / Legion SDK (https://docs.bloxity.io/#html5).
-// Phase 0 only READS identity + avatar; no login UI, friends, purchases or ads.
+// Bridge to the Boxity / Legion SDK (https://docs.bloxity.io/#html5).
 // If the SDK script failed to load, everything falls back to the default
 // Legion character (skins/0.png) and the name "Player" — never throws.
 import { LEGION_CDN } from './legion-avatar.js';
 
-export const GAME_SLUG = 'cipher-clash';
+export const GAME_SLUG = 'verity-quiz';     // the game's slug on bloxity.io
+export const HOSTING_ID = 'verity-quiz';    // the backend's id on hosting.bloxity.io (play.bloxity.io matchmaker)
 let started = false;
 
-function sdk() { return (window.Legion && window.Legion.SDK) || null; }
+export function sdk() { return (window.Legion && window.Legion.SDK) || null; }
 function safe(fn, fallback) { try { const v = fn(); return v === undefined ? fallback : v; } catch { return fallback; } }
 
 export function startLegion() {
@@ -15,8 +15,19 @@ export function startLegion() {
   if (!S || started) return !!S;
   started = true;
   try { S.init({ gameSlug: GAME_SLUG }); } catch (e) { console.warn('[legion] init failed', e); }
+  // registered on boot so Boxity shows its emote button (it draws the picker itself)
+  safe(() => S.game.registerFeature('emotes'));
   return true;
 }
+
+/** Boxity JWT for the server to verify (null for guests). */
+export function getToken() {
+  const S = sdk();
+  return S ? safe(() => S.auth.getToken(), null) : null;
+}
+
+export function legionLoadingStep(text) { safe(() => sdk()?.game.loadingStep(text)); }
+export function legionLoadingEnd() { safe(() => sdk()?.game.loadingEnd()); }
 
 /** Snapshot of the local player: { name, pfp, isGuest, equipped, skinUrl, proportions } */
 export function getLocalPlayer() {
