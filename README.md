@@ -27,7 +27,7 @@ npm run zip:dev    # release/pattern-rush-client-dev.zip  -> verity-quiz.dev.pla
 npm run zip:prod   # release/pattern-rush-client-prod.zip -> verity-quiz.play.bloxity.io (prod backend)
 ```
 
-Upload the ZIP under My Games → verity-quiz → Frontend, on the matching Dev or Prod channel. The ZIP has `index.html` at its root.
+Upload the ZIP on the hosting dashboard (verity-quiz) → Frontend, on the matching Dev or Prod channel. The ZIP has `index.html` at its root.
 
 The game slug and hosting id are `verity-quiz` (`src/bloxity/legion-sdk.js`). The client sends `Legion.SDK.auth.getToken()` with `identify` so the server can verify the account, plays Boxity emotes (`src/bloxity/legion-emotes.js`) and relays them, and shows Boxity chat messages as bubbles above each player.
 
