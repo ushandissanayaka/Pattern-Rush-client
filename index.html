@@ -9,8 +9,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Luckiest+Guy&family=Nunito:wght@600;800&family=Montserrat:wght@700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/src/index.css">
-  <!-- Boxity / Legion SDK: read-only identity + avatar (js/legion-sdk.js).
-       If it fails to load, the default Legion character and "Player" are used. -->
+  <!-- Boxity / Legion SDK (always the hosted copy, loaded before the game so party play works):
+       identity, avatar, friends, settings, Gems, matchmaking — wrapped by src/bloxity/legion-sdk.js.
+       If it fails to load, the default Legion character and a suggested guest name are used. -->
   <script src="https://sdk.bloxity.io/v1/legion-sdk.min.js"></script>
 </head>
 <body data-screen="lobby">
@@ -35,10 +36,18 @@
 
   <!-- ===================== LOBBY HUD (S01 — every frame of the video) ===================== -->
   <div class="hud" id="hud" data-screen-layer="hud">
-    <!-- Sound on / off (also the M key) -->
-    <button class="hud-sound" id="btn-sound" type="button" aria-pressed="false" aria-label="Sound on. Turn sound off (M)">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path class="hud-sound__speaker" d="M4 9h4l5-4v14l-5-4H4z"/><path class="hud-sound__waves" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12"/><path class="hud-sound__off" d="M16 9l6 6M22 9l-6 6"/></svg>
-    </button>
+    <!-- Top-right corner: Boxity profile (src/ui/profile.js). Sound: M key + Boxity volume settings -->
+    <div class="hud-topright">
+      <div class="profile" id="profile">
+        <button class="profile__chip" id="profile-chip" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="profile-menu" aria-label="Profile">
+          <img class="profile__pfp" id="profile-pfp" src="https://static.bloxity.io/img/pfps/0.png?width=128&amp;quality=85" alt="" draggable="false">
+          <span class="profile__text"><span class="profile__name" id="profile-name">Player</span><span class="profile__sub" id="profile-sub">Guest</span></span>
+        </button>
+        <div class="profile-menu" id="profile-menu" role="dialog" aria-label="Your profile" hidden></div>
+      </div>
+    </div>
+    <!-- Boxity setting show_fps -->
+    <div class="hud-fps" id="hud-fps" aria-hidden="true" hidden>-- FPS</div>
 
     <!-- Left rail -->
     <div class="hud-left">

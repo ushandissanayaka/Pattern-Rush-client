@@ -224,22 +224,34 @@ function stepBlock(x, z, parent, rot = 0, sc = 1) {
 
 /* ---------- booth (one 1v1 match station) ---------- */
 const BOOTH_W = 34, BOOTH_D = 30, BOOTH_H = 21;
-function codeBarTex(placed) {
-  return canvasTex(1024, 112, (g, w, h) => {
-    g.fillStyle = '#e9eef0'; g.fillRect(0, 0, w, h);
-    g.fillStyle = C.codeBar; g.fillRect(8, 8, w - 16, h - 16);
-    const cells = 9, cw = (w - 16) / cells;
-    g.font = "700 84px 'Fredoka'"; g.textAlign = 'center'; g.textBaseline = 'middle';   // rounded bold "?" (screenshot 46)
-    for (let i = 0; i < cells; i++) {
-      const cx = 8 + cw * (i + 0.5), t = placed[i];
-      if (!t) { g.fillStyle = '#e4e6e8'; g.fillText('?', cx, h / 2 + 4); continue; }
-      // PLACEHOLDER token shapes (no faces / original art)
-      g.fillStyle = t.color;
-      if (t.shape === 'gem') { g.fillStyle = '#0d1418'; g.fillRect(cx - cw / 2 + 4, 12, cw - 8, h - 24); g.fillStyle = t.color; g.beginPath(); g.moveTo(cx - 30, h / 2 - 8); g.lineTo(cx + 30, h / 2 - 8); g.lineTo(cx, h / 2 + 30); g.fill(); g.fillRect(cx - 30, h / 2 - 22, 60, 14); }
-      else if (t.shape === 'cube') { g.fillRect(cx - cw / 2 + 6, 14, cw - 12, h - 28); }
-      else { g.beginPath(); g.arc(cx, h / 2, 40, 0, Math.PI * 2); g.fill(); g.fillStyle = 'rgba(255,255,255,.45)'; g.beginPath(); g.arc(cx - 12, h / 2 - 14, 11, 0, Math.PI * 2); g.fill(); }
-    }
+// Booth code shelf: an open recess in the front facade. The objects stand inside it side by side,
+// their tops tucked under the top beam; every slot still hidden is closed by a dark "?" panel
+// (match.js hides a slot's panel when its object is revealed).
+export const SHELF = { front: 15, depth: 3.6, y0: 2, y1: 5.1, width: 26, objectX: 13.2, objectSize: 2.95 };   // booth-local
+export const shelfSlotZ = (i) => SHELF.width / 2 - (i + 0.5) * (SHELF.width / 9);
+// hidden slot: a dark panel with a big "?" covering that slot's opening; side by side they form one
+// dark strip. Unlit, so the colours stay the same in sun and shadow.
+let shelfCardMat = null;   // built on first use: the "?" needs the web font (loaded before buildWorld)
+function getShelfCardMat() {
+  if (shelfCardMat) return shelfCardMat;
+  const map = canvasTex(256, Math.round(256 * (SHELF.y1 - SHELF.y0) / (SHELF.width / 9)), (g, w, h) => {
+    g.fillStyle = '#161a1f'; g.fillRect(0, 0, w, h);
+    g.fillStyle = '#dee3e0'; g.font = `700 ${Math.round(h * 0.86)}px 'Fredoka'`; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText('?', w / 2, h / 2 + h * 0.04);
   });
+  map.wrapS = map.wrapT = THREE.ClampToEdgeWrapping;
+  return (shelfCardMat = new THREE.MeshBasicMaterial({ map }));
+}
+const shelfCardGeo = new THREE.PlaneGeometry(SHELF.width / 9 + 0.01, SHELF.y1 - SHELF.y0);
+const cardMatrix = new THREE.Matrix4(), cardTurn = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2);
+/** Closes every slot of a shelf's panel strip except the revealed ones (revealed[i] truthy). */
+export function setShelfSlots(cards, revealed) {
+  const y = (SHELF.y0 + SHELF.y1) / 2, pos = new THREE.Vector3(), scale = new THREE.Vector3();
+  for (let i = 0; i < 9; i++) {
+    pos.set(SHELF.front - 0.12, y, shelfSlotZ(i)); scale.setScalar(revealed[i] ? 0 : 1);
+    cards.setMatrixAt(i, cardMatrix.compose(pos, cardTurn, scale));
+  }
+  cards.instanceMatrix.needsUpdate = true;
 }
 function tokenMesh(t) {
   if (t.shape === 'gem') { const m = new THREE.Mesh(new THREE.OctahedronGeometry(1.6, 0), mat(t.color, { roughness: 0.2, flatShading: true })); m.scale.y = 0.8; return m; }
@@ -272,13 +284,19 @@ function booth(side, z, trim, state, parent, seam = 1) {
   }
   noShadow(box(0.28, 0.28, BOOTH_W - 4, nm, -BOOTH_D / 2 + 2.4, BOOTH_H - 2.5, 0, g, false));
   // tiered stand: lower facade with the code bar, upper deck where players stand
-  box(14, 9, BOOTH_W - 4, white, BOOTH_D / 2 - 7, 4.5, 0, g);
+  // lower facade, built around the open code shelf (SHELF): block behind it, floor slab, top beam, ends
+  const { depth: sd, y0: sy0, y1: sy1, width: sw } = SHELF, sx = BOOTH_D / 2 - sd / 2;
+  box(14 - sd, 9, BOOTH_W - 4, white, BOOTH_D / 2 - 14 + (14 - sd) / 2, 4.5, 0, g);
+  box(sd, sy0, BOOTH_W - 4, white, sx, sy0 / 2, 0, g);
+  box(sd, 9 - sy1, BOOTH_W - 4, white, sx, (9 + sy1) / 2, 0, g);
+  for (const s of [-1, 1]) box(sd, sy1 - sy0, (BOOTH_W - 4 - sw) / 2, white, sx, (sy0 + sy1) / 2, s * (BOOTH_W - 4 + sw) / 4, g);
   box(14, 13, BOOTH_W - 4, white, BOOTH_D / 2 - 21, 6.5, 0, g);
   noShadow(box(4, 1.2, BOOTH_W - 6, mat(C.boothShade), BOOTH_D / 2 - 1.5, 9.6, 0, g, false));   // ledge lip
-  const bar = new THREE.Mesh(new THREE.PlaneGeometry(BOOTH_W - 8, 3.6),
-    matte({ map: codeBarTex(state.tokens || []), roughness: 0.6 }));
-  bar.rotation.y = Math.PI / 2; bar.position.set(BOOTH_D / 2 + 0.08, 5.2, 0); g.add(bar);   // clear of the facade (no z-fighting)
-  g.userData.barTex = bar.material.map;   // redrawn by the match system as slots are revealed
+  // all 9 panels in one draw call; match.js hides a slot with setShelfSlots()
+  const cards = noShadow(new THREE.InstancedMesh(shelfCardGeo, getShelfCardMat(), 9));
+  cards.userData.dynamic = true;   // shown / hidden during matches: keep it out of the static batch
+  g.add(cards); g.userData.shelfCards = cards;
+  setShelfSlots(cards, []);
   // tokens waiting on the ledge (same order as the bar)
   (state.tokens || []).forEach((t, i) => {
     if (!t) return;
@@ -866,7 +884,7 @@ export function buildWorld(scene) {
       redG.userData.class = `booth booth--red station-${id}`; blueG.userData.class = `booth booth--cyan station-${id}`;
       const sign = liveSign(4.6); sign.set('AVAILABLE', C.textAvailable, '0/2 Players');
       sign.sprite.position.set(side * 29, 12.5, zc); root.add(sign.sprite);
-      const half = (g, color) => { g.updateMatrixWorld(true); return { color, group: g, z: g.position.z, pad: g.localToWorld(g.userData.padLocal.clone()), barTex: g.userData.barTex }; };
+      const half = (g, color) => { g.updateMatrixWorld(true); return { color, group: g, z: g.position.z, pad: g.localToWorld(g.userData.padLocal.clone()), shelfCards: g.userData.shelfCards }; };
       STATIONS.push({ id, side, z: zc, red: half(redG, 'red'), blue: half(blueG, 'blue'), sign });
     }
     // trees behind the playing places and in the gaps between them

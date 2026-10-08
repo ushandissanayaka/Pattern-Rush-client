@@ -7,11 +7,12 @@
 // Spectating: every client replays the public match events of the other booths (objects carried,
 //   correct ones placed on the ledge, wrong ones vanish), and WATCH points the camera at one booth.
 import * as THREE from 'three';
-import { STATIONS } from '../scene/world.js';
+import { STATIONS, SHELF, shelfSlotZ, setShelfSlots } from '../scene/world.js';
 import { showScreen } from '../ui/hud.js';
+import { openBuy } from '../ui/popups.js';
 import { sfx } from '../audio/sound.js';
 import { LegionCharacter, LEGION_CDN } from '../bloxity/legion-avatar.js';
-import { TOKENS, TOKEN, PATTERN_LENGTH, randomPattern, tokenIcon, tokenMesh, drawBarCell } from './tokens.js';
+import { TOKENS, TOKEN, PATTERN_LENGTH, randomPattern, tokenIcon, tokenMesh } from './tokens.js';
 
 const TURN_TIME = 20, VOTE_TIME = 5, BUILD_TIME = 20, START_COUNT = 3;
 const JOIN_RADIUS = 5;
@@ -19,12 +20,19 @@ const C_AVAILABLE = '#2fe01a', C_STARTING = '#d61ad6', C_PROGRESS = '#ff1a1a', C
 const SIDE_COLOR = { red: '#ff5a5a', blue: '#4fc3ff' };
 
 // booth-local layout (see booth() in world.js; local +X faces the road)
-const SLOT_Z = (i) => 13 - (i + 0.5) * (26 / PATTERN_LENGTH);
+const SLOT_Z = shelfSlotZ;      // slot columns line up with the code shelf
 const DECK_X = -1, DECK_Y = 13, LEDGE_X = 12.8, LEDGE_Y = 10.2, TOKEN_SIZE = 2.85;   // objects sit on the front lip
 const CHAR_SCALE = 1.5;          // characters are bigger inside the playing place (screenshots 66–78)
-const BAR_X = 15.2, BAR_Y = 5.2, BAR_SIZE = 2.6;    // half sunk into the bar, like a shelf
+// revealed objects stand inside the code shelf (world.js SHELF), their tops tucked under its top beam
+const BAR_SIZE = SHELF.objectSize, BAR_X = SHELF.objectX, BAR_Y = SHELF.y0 + BAR_SIZE * 0.47;
 const IDLE_Z = 12;               // stand at the left end, beside the panels
 const CAM_LOCAL = new THREE.Vector3(33, 15, 0), LOOK_LOCAL = new THREE.Vector3(0, 13.5, 0);
+// Gems items in a match (purchase popup: ui/buy-popup.js); price = label until the catalog price loads
+const ITEMS = {
+  reset: { sku: 'troll_reset_shuffle', name: 'Shuffle and Reset (OP)', price: 49, icon: 'assets/icon-shuffle.svg' },
+  skip: { sku: 'troll_skip_turn', name: 'Skip Opponent Turn', price: 7, icon: 'assets/icon-skip.svg' },
+  reveal: { sku: 'reveal_next_answer', name: 'Reveal Next Answer', price: 4, icon: 'assets/icon-reveal.svg' }
+};
 
 /* ---------------- DOM ---------------- */
 function el(tag, cls, parent, text) {
@@ -141,20 +149,11 @@ function guideBox() {   // translucent green box marking the next slot (screensh
   edges.renderOrder = 20; g.add(edges);
   return g;
 }
+// code shelf: every slot still hidden is closed by its dark "?" panel (revealed slots show the 3D object)
 function drawBar(half, revealed) {
-  const tex = half.barTex, c = tex.image, g = c.getContext('2d'), w = c.width, h = c.height;
-  g.fillStyle = '#e9eef0'; g.fillRect(0, 0, w, h);
-  g.fillStyle = '#141d24'; g.fillRect(8, 8, w - 16, h - 16);
-  const cw = (w - 16) / PATTERN_LENGTH;
-  g.font = "700 84px 'Fredoka'"; g.textAlign = 'center'; g.textBaseline = 'middle';
-  for (let i = 0; i < PATTERN_LENGTH; i++) {
-    const x = 8 + cw * i;
-    if (revealed[i]) drawBarCell(g, revealed[i], x, 8, cw + 0.5, h - 16);
-    else { g.fillStyle = '#e4e6e8'; g.fillText('?', x + cw / 2, h / 2 + 4); }
-  }
-  tex.needsUpdate = true;
+  setShelfSlots(half.shelfCards, revealed);
 }
-// code bar plus the objects half sunk into it for every revealed slot
+// code shelf: one object standing inside it for every revealed slot
 function showProgress(p, vis) {
   drawBar(p.half, vis);
   p.barMeshes = p.barMeshes || [];
@@ -183,6 +182,7 @@ export function createMatchSystem({ scene, camera, me, feet, state, getName, mul
   const camPos = new THREE.Vector3(), camLook = new THREE.Vector3();
   let camActive = false, camInit = false;
   let lastSpeed = 0;                     // own avatar speed during a match (sent to the lobby as 'walk')
+  let buying = false;                    // a Gems purchase popup is open (turn clocks wait)
   // matchmaking queue + spectating
   let inQueue = false, queueSize = 0, pendingBot = false, keepQueue = false, lastScreen = document.body.dataset.screen;
   const stationInfo = new Map();         // stationId → latest public booth state from the server
@@ -473,6 +473,7 @@ export function createMatchSystem({ scene, camera, me, feet, state, getName, mul
         while (left > 0) {
           await wait(0.1); if (myGen !== gen) return false;
           if (isDone()) return true;
+          if (buying) continue;              // the turn clock waits while the purchase popup is open
           left -= 0.1; tick(); onTick && onTick(left);
         }
         return false;
@@ -495,7 +496,14 @@ export function createMatchSystem({ scene, camera, me, feet, state, getName, mul
       }
     };
     ui.submit.onclick = () => { if (picked) chosen = picked; };
-    ui.reveal.onclick = () => toast('Coming soon!');
+    // the answer is only known locally vs. the bot (online the server never sends your opponent's pattern)
+    ui.reveal.onclick = async () => {
+      if (networkMatch) { toast('Coming soon!'); return; }
+      const slot = p.idx;
+      if (!(await buyInMatch(myGen, ITEMS.reveal)) || chosen !== null || p.idx !== slot) return;
+      chosen = p.target[slot];
+      toast(`It's ${TOKEN[chosen].name}!`);
+    };
     if (prev && M.lastWasCorrect && !p.wrong[p.idx].has(prev)) {
       show(ui.repeat, true); show(ui.reveal, true); show(ui.guess, false); show(ui.submit, false);
       ui.repeatBtn.onclick = () => { chosen = prev; };
@@ -527,14 +535,45 @@ export function createMatchSystem({ scene, camera, me, feet, state, getName, mul
     });
   }
   async function botChoose(myGen, p) {
+    if (M.trollReset) resetProgress(p);
     const clock = turnClock(myGen, p);
     const think = 1.2 + Math.random() * 1.6;
     let t = 0, choice = null;
-    await clock.run(() => (t += 0.1) >= think);
+    await clock.run(() => M.trollSkip || M.trollReset || (!buying && (t += 0.1) >= think));
     if (myGen !== gen) return null;
+    if (M.trollReset) resetProgress(p);
+    if (M.trollSkip) {
+      M.trollSkip = false;
+      say(p.char, 'Hey! My turn!', 'wrong');
+      toast(`${p.name}'s turn skipped!`);
+      return { passed: true };
+    }
     const opts = optionsFor(p), prev = p.idx > 0 ? p.revealed[p.idx - 1] : null;
     choice = (prev && opts.includes(prev) && Math.random() < 0.45) ? prev : opts[Math.floor(Math.random() * opts.length)];
     return choice;
+  }
+
+  // "Shuffle and Reset": the opponent loses every slot they cracked and their pattern is shuffled.
+  // Applied between the bot's guesses, never while it is carrying an object.
+  function resetProgress(p) {
+    M.trollReset = false;
+    for (const mesh of p.placed) if (mesh) p.half.group.remove(mesh);
+    for (const mesh of p.barMeshes || []) if (mesh) p.half.group.remove(mesh);
+    p.placed = []; p.barMeshes = []; p.revealed = []; p.idx = 0;
+    p.wrong = Array.from({ length: PATTERN_LENGTH }, () => new Set());
+    for (let i = p.target.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [p.target[i], p.target[j]] = [p.target[j], p.target[i]]; }
+    syncBar(p);
+    p.guide.position.set(LEDGE_X, LEDGE_Y + TOKEN_SIZE / 2 + 0.2, SLOT_Z(0));
+    say(p.char, 'Nooo! My progress!', 'wrong');
+    toast(`${p.name}'s progress was reset and shuffled!`);
+  }
+  // purchase popup during a match; true only if it was bought and the same match is still running
+  async function buyInMatch(myGen, item) {
+    buying = true;
+    try {
+      const bought = await openBuy({ ...item, metadata: { stationId: M?.station.id } });
+      return bought && myGen === gen && !!M && !M.over;
+    } finally { buying = false; }
   }
 
   // speech bubbles over heads; one per character, replaced by the next line it says
@@ -813,8 +852,15 @@ export function createMatchSystem({ scene, camera, me, feet, state, getName, mul
     multiplayer?.send('play-bot');   // the server turns your waiting booth into a practice booth
     playVsBot();
   };
-  ui.reset.onclick = () => toast('Coming soon!');
-  ui.skip.onclick = () => toast('Coming soon!');
+  // TROLL YOUR OPPONENT (shown during the bot's turn): the effect lands on the bot's next guess
+  ui.reset.onclick = async () => {
+    if (phase !== 'playing' || !M?.opp.isBot) return;
+    if (await buyInMatch(gen, ITEMS.reset)) M.trollReset = true;
+  };
+  ui.skip.onclick = async () => {
+    if (phase !== 'playing' || !M?.opp.isBot) return;
+    if (await buyInMatch(gen, ITEMS.skip)) M.trollSkip = true;
+  };
   ui.watchPrev.onclick = () => cycleWatch(-1);
   ui.watchNext.onclick = () => cycleWatch(1);
   ui.watchStop.onclick = stopWatching;

@@ -6,6 +6,7 @@ const MUSIC_VOLUME = 0.32, SFX_VOLUME = 0.8;
 const buffers = {};
 let ctx = null, sfxBus = null, musicBus = null, musicStarted = false, rendering = null;
 let muted = false;
+let masterLevel = 1, musicLevel = 1;   // Boxity settings master_volume / music_volume (0..1)
 try { muted = localStorage.getItem('cc:muted') === '1'; } catch { /* storage blocked: start with sound on */ }
 
 /** Generate every sound on a background thread (call early; no user gesture needed). */
@@ -39,7 +40,7 @@ function unlock() {
   ctx = new AC();
   sfxBus = ctx.createGain(); sfxBus.gain.value = SFX_VOLUME;
   musicBus = ctx.createGain(); musicBus.gain.value = 0;
-  const master = ctx.createGain(); master.gain.value = muted ? 0 : 1;
+  const master = ctx.createGain(); master.gain.value = muted ? 0 : masterLevel;
   sfxBus.connect(master); musicBus.connect(master); master.connect(ctx.destination);
   ctx.master = master;
   ctx.resume?.();
@@ -51,7 +52,7 @@ function startMusic() {
   const src = ctx.createBufferSource(); src.buffer = buffers.music; src.loop = true;
   src.connect(musicBus); src.start();
   musicBus.gain.setValueAtTime(0, ctx.currentTime);
-  musicBus.gain.linearRampToValueAtTime(MUSIC_VOLUME, ctx.currentTime + 2.5);   // gentle fade-in
+  musicBus.gain.linearRampToValueAtTime(MUSIC_VOLUME * musicLevel, ctx.currentTime + 2.5);   // gentle fade-in
 }
 
 /** Play a sound effect: click, pickup, drop, step, correct, wrong, win, lose. */
@@ -67,8 +68,17 @@ export const isMuted = () => muted;
 export function setMuted(on) {
   muted = on;
   try { localStorage.setItem('cc:muted', on ? '1' : '0'); } catch { /* not persisted */ }
-  if (ctx) ctx.master.gain.setTargetAtTime(on ? 0 : 1, ctx.currentTime, 0.05);
+  if (ctx) ctx.master.gain.setTargetAtTime(on ? 0 : masterLevel, ctx.currentTime, 0.05);
   window.dispatchEvent(new CustomEvent('cc:muted', { detail: on }));
+}
+
+/** Volume levels from 0 to 1 (Boxity portal settings). Leave either undefined to keep it. */
+export function setVolumes({ master, music } = {}) {
+  if (Number.isFinite(master)) masterLevel = Math.min(1, Math.max(0, master));
+  if (Number.isFinite(music)) musicLevel = Math.min(1, Math.max(0, music));
+  if (!ctx) return;
+  ctx.master.gain.setTargetAtTime(muted ? 0 : masterLevel, ctx.currentTime, 0.05);
+  if (musicStarted) musicBus.gain.setTargetAtTime(MUSIC_VOLUME * musicLevel, ctx.currentTime, 0.05);
 }
 
 export function initAudio() {

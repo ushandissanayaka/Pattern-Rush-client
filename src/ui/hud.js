@@ -1,6 +1,6 @@
 // HUD glue: screen switcher (URL hash), avatar slots, dev panel, offer rotation,
 // event countdown.
-import { getLocalPlayer } from '../bloxity/legion-sdk.js';
+import { getLocalPlayer, isEmbedded, showPortalMenu } from '../bloxity/legion-sdk.js';
 import { initPopups, openBuy, OFFER_INFO } from './popups.js';
 // Everything that will later call into game logic is a named no-op stub below,
 // so selectors in docs/DESIGN.md map 1:1 onto future functions.
@@ -145,7 +145,11 @@ export function initHud() {
   // Daily Rewards pops up when the game opens (screenshot 83)
   const startHash = location.hash.slice(1).split('?')[0];
   showScreen(startHash && startHash !== 'lobby' ? startHash : 'daily');
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.body.dataset.screen !== 'lobby') showScreen('lobby'); });
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    if (document.body.dataset.screen !== 'lobby') showScreen('lobby');
+    else if (isEmbedded()) showPortalMenu();   // nothing open: ESC opens Boxity's pause menu
+  });
 
   // offers rotate every ≈10.2 s, as in the video
   let step = 0;

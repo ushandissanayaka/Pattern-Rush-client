@@ -30,6 +30,7 @@ export class CameraRig {
     this.target = { ...s };
     this.focus = new THREE.Vector3();
     this.damping = 12;
+    this.sensitivity = 1;                // Boxity setting camera_sensitivity
     this.enabled = true;
     this._bindInput(dom);
   }
@@ -67,7 +68,7 @@ export class CameraRig {
       const p = pointers.get(e.pointerId);
       if (!p || !this.enabled) return;
       if (pointers.size === 1) {
-        this.orbit(-(e.clientX - p.x) * ROTATE_SPEED, (e.clientY - p.y) * PITCH_SPEED);
+        this.orbit(-(e.clientX - p.x) * ROTATE_SPEED * this.sensitivity, (e.clientY - p.y) * PITCH_SPEED * this.sensitivity);
       }
       p.x = e.clientX; p.y = e.clientY;
       if (pointers.size === 2 && pinchStart > 0) {           // touch pinch zoom
@@ -86,7 +87,7 @@ export class CameraRig {
       if (e.ctrlKey) this.zoomBy(Math.exp(dy * PINCH_ZOOM));   // trackpad pinch
       else {
         this.zoomBy(Math.exp(dy * WHEEL_ZOOM));                 // wheel / two-finger scroll
-        if (Math.abs(dx) > Math.abs(dy)) this.orbit(-dx * SWIPE_ORBIT, 0); // two-finger sideways swipe
+        if (Math.abs(dx) > Math.abs(dy)) this.orbit(-dx * SWIPE_ORBIT * this.sensitivity, 0); // two-finger sideways swipe
       }
     }, { passive: false });
     // stop Safari's page pinch-zoom from stealing trackpad / touch pinches

@@ -56,7 +56,7 @@ function loadSkinTexture(url) {
 }
 
 const X_AXIS = new THREE.Vector3(1, 0, 0), Z_AXIS = new THREE.Vector3(0, 0, 1);
-const tmpQ = new THREE.Quaternion();
+const tmpQ = new THREE.Quaternion(), emoteQ = new THREE.Quaternion(), emoteEuler = new THREE.Euler();
 
 export class LegionCharacter {
   /** @param {{skinUrl?:string, equipped?:object, tint?:string, castShadow?:boolean}} opts */
@@ -160,6 +160,46 @@ export class LegionCharacter {
   /** Per-frame pose. speed: horizontal speed in studs/s (0 = standing). */
   update(dt, speed = 0) {
     if (!this.ready) return;
+    this._pose(dt, speed);
+    if (this.emote) this._emotePose(dt);
+  }
+
+  /** Plays a Boxity emote clip ({ len, loop, tracks }) over the current pose. */
+  playEmote(clip) {
+    if (!clip?.tracks || !(clip.len > 0)) return;
+    this.emote = { clip, time: 0 };
+  }
+
+  stopEmote() { this.emote = null; }
+
+  // Track values are degree deltas over the bind pose (euler XYZ, right-multiplied onto the bone's
+  // bind quaternion), smoothstepped between keys and clamped outside them; unknown bones are skipped.
+  _emotePose(dt) {
+    const emote = this.emote, clip = emote.clip;
+    emote.time += dt;
+    if (!clip.loop && emote.time >= clip.len) { this.emote = null; return; }
+    const t = clip.loop ? emote.time % clip.len : emote.time;
+    const weight = Math.min(1, emote.time / 0.1);     // blend in over 0.1 s
+    for (const [name, keys] of Object.entries(clip.tracks)) {
+      const entry = this.bones[name];
+      if (!entry || !Array.isArray(keys) || !keys.length) continue;
+      let a = keys[0], b = keys[0], s = 0;
+      if (t >= keys[keys.length - 1][0]) a = b = keys[keys.length - 1];
+      else if (t > keys[0][0]) {
+        let i = 1;
+        while (keys[i][0] < t) i++;
+        a = keys[i - 1]; b = keys[i];
+        const u = (t - a[0]) / Math.max(b[0] - a[0], 1e-6);
+        s = u * u * (3 - 2 * u);
+      }
+      const deg = (k) => THREE.MathUtils.degToRad((a[k] ?? 0) + ((b[k] ?? 0) - (a[k] ?? 0)) * s);
+      emoteEuler.set(deg(1), deg(2), deg(3), 'XYZ');
+      emoteQ.copy(entry.q).multiply(tmpQ.setFromEuler(emoteEuler));
+      entry.bone.quaternion.slerp(emoteQ, weight);
+    }
+  }
+
+  _pose(dt, speed) {
     const moving = speed > 0.5 && this.state !== 'jump' && this.state !== 'cheer';
     this.blend += ((moving ? 1 : 0) - this.blend) * (1 - Math.exp(-dt * 10));
     this.phase += dt;

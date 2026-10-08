@@ -76,13 +76,6 @@ export function tokenIcon(id) {
   }
   return iconCache.get(id);
 }
-/** Code-bar cell background for a revealed token (screenshots 70–78). */
-export function drawBarCell(g, id, x, y, w, h) {
-  const t = TOKEN[id];
-  g.fillStyle = t.kind === 'gem' ? '#05080b' : t.kind === 'block' ? '#2bbfb6' : '#eef2f4';
-  g.fillRect(x, y, w, h);
-  if (t.kind === 'block') drawBlock(g, x, y, Math.min(w, h)); else drawToken(g, id, x + w / 2, y + h / 2, Math.min(w, h) * 1.05);
-}
 
 /* ---------- 3D meshes ---------- */
 // Ball texture: the face is drawn flat on its own canvas, then projected onto the front
