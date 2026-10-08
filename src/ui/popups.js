@@ -1,8 +1,10 @@
 // Popups (screenshots 83–93): Daily Rewards, Shop (Offers / Luck / Passes / Cash),
-// Inventory, Index, and the purchase confirmation. Prices are in Bloxity Gems.
-// Purchases are UI only: "Buy" will call the Bloxity SDK checkout in a later phase.
+// Inventory, Index. Prices are in Bloxity Gems: "Buy" opens the purchase popup (ui/buy-popup.js),
+// which passes only the item's sku to Legion.SDK.gems.requestPurchase — the real price comes from
+// the Boxity catalog for that sku (the gem numbers on the cards are labels only).
 // All text is set with textContent; art is drawn on canvas (original, no copied assets).
 import { TOKENS, tokenIcon, faceIcon } from '../game/tokens.js';
+import { openPurchase } from './buy-popup.js';
 
 /* ---------------- tiny DOM helpers ---------------- */
 function el(tag, cls, parent, text) {
@@ -124,31 +126,32 @@ function frame(section, { theme, icon, title, wide }) {
   return { p, head, actions, body };
 }
 
-/* ---------------- payment confirmation (Bloxity Gems) ---------------- */
-let buyLayer;
-export function openBuy({ name, price, icon }) {
-  buyLayer.replaceChildren();
-  const box = el('div', 'pay', buyLayer);
-  const top = el('div', 'pay__top', box);
-  el('span', 'pay__title', top, 'Buy Gems and item');
-  const bal = el('span', 'pay__bal', top); img('assets/gem.svg', 'pay__gem', bal); el('span', '', bal, '0');
-  const x = el('button', 'pay__x', top, '✕'); x.type = 'button'; x.setAttribute('aria-label', 'Close'); x.onclick = closeBuy;
-  const item = el('div', 'pay__item', box);
-  img(icon, 'pay__icon', item);
-  const meta = el('div', 'pay__meta', item); el('div', 'pay__name', meta, name);
-  const pr = el('div', 'pay__price', meta); img('assets/gem.svg', 'pay__gem', pr); el('span', '', pr, String(price));
-  const opt = el('button', 'pay__opt', box); opt.type = 'button';
-  const l = el('span', 'pay__optl', opt); img('assets/gem.svg', 'pay__gem', l); el('span', '', l, '500');
-  const old = el('span', 'pay__old', l); img('assets/gem.svg', 'pay__gem pay__gem--old', old); el('s', '', old, '400');
-  el('span', 'pay__usd', opt, '$4.99');
-  const buy = el('button', 'pay__buy', box, 'Buy'); buy.type = 'button';
-  buy.onclick = () => { buy.textContent = 'Coming soon'; buy.disabled = true; };   // Bloxity checkout hooks in later
-  const legal = el('p', 'pay__legal', box, 'Your payment method will be charged. Bloxity ');
-  const a = el('a', '', legal, 'Terms of Use'); a.href = 'https://bloxity.io/'; a.target = '_blank'; a.rel = 'noopener';
-  legal.append(' apply.');
-  buyLayer.hidden = false;
+/* ---------------- Gems purchases (Boxity draws the payment dialog) ---------------- */
+// Each transaction is granted once, whether the purchase result or the server's gems-grant arrives first.
+const granted = new Set();
+try { for (const id of JSON.parse(localStorage.getItem('cc:purchases') || '[]')) granted.add(id); } catch { /* storage blocked */ }
+function grant({ transactionId, sku }) {
+  if (!transactionId || granted.has(transactionId)) return;
+  granted.add(transactionId);
+  try { localStorage.setItem('cc:purchases', JSON.stringify([...granted].slice(-200))); } catch { /* not persisted */ }
+  window.dispatchEvent(new CustomEvent('cc:purchase', { detail: { sku, transactionId } }));
 }
-function closeBuy() { buyLayer.hidden = true; buyLayer.replaceChildren(); }
+let toastTimer = 0;
+function toast(text, ok) {
+  document.querySelector('.cc-toast')?.remove();
+  const t = el('div', `cc-toast ${ok ? 'cc-toast--ok' : 'cc-toast--err'}`, document.body, text);
+  t.setAttribute('role', 'status');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.remove(), 3200);
+}
+/** Purchase popup for one item; resolves true once it is bought (and granted). */
+export async function openBuy({ name, sku, icon, price, metadata }) {
+  if (!sku) return false;
+  const result = await openPurchase({ sku, name, icon, price, metadata: { item: name, ...metadata } });
+  if (!result.success) return false;
+  grant({ transactionId: result.transactionId, sku });
+  toast(`${name} purchased!`, true);
+  return true;
+}
 
 /* ---------------- Daily Rewards (screenshot 83) ---------------- */
 function buildDaily(section) {
@@ -161,7 +164,7 @@ function buildDaily(section) {
   const all = el('button', 'pp-claimall', actions); all.type = 'button';
   el('span', 'pp-stroke', all, 'CLAIM ALL');
   const only = el('span', 'pp-only pp-stroke', all); el('span', '', only, 'ONLY '); gemPrice(only, 85, 'pp-inline');
-  all.onclick = () => openBuy({ name: 'Claim All Daily Rewards', price: 85, icon: PACKS.cipher() });
+  all.onclick = () => openBuy({ name: 'Claim All Daily Rewards', sku: 'daily_claim_all', price: 85, icon: PACKS.cipher() });
   const grid = el('div', 'daily-grid', body);
   const days = [
     [1, 'pink', PACKS.cipher(), '+1 Cipher Pack', true], [2, 'orange', cashArt(1), '+750 Cash'], [3, 'yellow', PACKS.emoji(), '+1 Emoji Pack'],
@@ -208,7 +211,7 @@ function packCard(parent, { theme, packIcon, isNew, title, sub, items, prices, t
     const b = el('button', `buy-btn pp-stroke ${i === 0 ? 'buy-btn--purple' : `buy-btn--${theme === 'limited' ? 'green' : 'orange'}`}`, w); b.type = 'button';
     gemPrice(b, price, 'pp-inline');
     if (i === 0) el('span', 'buy-btn__tag pp-stroke', w, tag);
-    b.onclick = () => openBuy({ name: `${title} x${qty}`, price, icon: packIcon });
+    b.onclick = () => openBuy({ name: `${title} x${qty}`, sku: `${theme}_pack_x${qty}`, price, icon: packIcon });
   });
 }
 function buildShop(section) {
@@ -241,7 +244,7 @@ function buildShop(section) {
   const sbuy = el('div', 'starter__buy', srow);
   el('div', 'starter__op pp-stroke', sbuy, 'OP Offer!');
   const sb = el('button', 'buy-btn buy-btn--green buy-btn--big pp-stroke', sbuy); sb.type = 'button'; gemPrice(sb, 25, 'pp-inline');
-  sb.onclick = () => openBuy({ name: 'Starter Pack', price: 25, icon: 'assets/starter-pack.svg' });
+  sb.onclick = () => openBuy({ name: 'Starter Pack', sku: 'starter_pack', price: 25, icon: 'assets/starter-pack.svg' });
 
   const luck = sec('Server Luck');
   const lc = el('div', 'luck', luck);
@@ -252,16 +255,16 @@ function buildShop(section) {
   const big = el('div', 'luck__mult pp-stroke', lm); el('span', '', big, '1x > '); el('span', 'luck__two', big, '2x');
   const lr = el('div', 'luck__buy', lc); el('div', 'luck__up pp-stroke', lr, 'Upgrade to 2x');
   const lb = el('button', 'buy-btn buy-btn--green buy-btn--big pp-stroke', lr); lb.type = 'button'; gemPrice(lb, 35, 'pp-inline');
-  lb.onclick = () => openBuy({ name: 'Server Luck 2x', price: 35, icon: cloverArt(false) });
+  lb.onclick = () => openBuy({ name: 'Server Luck 2x', sku: 'server_luck_2x', price: 35, icon: cloverArt(false) });
 
   const passes = sec('Gamepasses');
   const pg = el('div', 'passes', passes);
-  for (const [cls, name, desc, icon, price] of [['green', 'x2 Cash', 'Get double cash permanently!', cashArt(1), 35], ['orange', 'x2 Wins', 'Get double wins permanently!', 'assets/trophy.svg', 75]]) {
+  for (const [cls, name, desc, icon, price, sku] of [['green', 'x2 Cash', 'Get double cash permanently!', cashArt(1), 35, 'pass_2x_cash'], ['orange', 'x2 Wins', 'Get double wins permanently!', 'assets/trophy.svg', 75, 'pass_2x_wins']]) {
     const c = el('div', `pass pass--${cls}`, pg);
     el('div', 'pass__rays', c); img(icon, 'pass__icon', c);
     el('div', 'pass__name pp-stroke', c, name); el('div', 'pass__desc pp-stroke', c, desc);
     const b = el('button', 'buy-btn buy-btn--green pass__buy pp-stroke', c); b.type = 'button'; gemPrice(b, price, 'pp-inline');
-    b.onclick = () => openBuy({ name, price, icon });
+    b.onclick = () => openBuy({ name, sku, price, icon });
   }
 
   const cash = sec('Extra Cash');
@@ -272,7 +275,7 @@ function buildShop(section) {
     el('div', 'cashcard__amt pp-stroke', c, `${amt} Cash`);
     if (best) el('div', 'cashcard__best pp-stroke', c, 'Best Deal!');
     const b = el('button', 'buy-btn buy-btn--green cashcard__buy pp-stroke', c); b.type = 'button'; gemPrice(b, price, 'pp-inline');
-    b.onclick = () => openBuy({ name: `${amt} Cash`, price, icon });
+    b.onclick = () => openBuy({ name: `${amt} Cash`, sku: `cash_${amt.toLowerCase()}`, price, icon });
   }
 
   const tabDefs = [['Offers', 'purple', PACKS.limited(), offers], ['Luck', 'teal', cloverArt(true), luck], ['Passes', 'brown', 'assets/trophy.svg', passes], ['Cash', 'olive', bagArt(), cash]];
@@ -337,14 +340,14 @@ export function initPopups(showScreen) {
   show = showScreen;
   const get = (name) => document.querySelector(`.screen[data-screen="${name}"]`);
   buildDaily(get('daily')); buildShop(get('shop')); buildInventory(get('inventory')); buildIndex(get('index'));
-  buyLayer = el('div', 'pay-layer', document.body); buyLayer.hidden = true;
-  buyLayer.addEventListener('click', (e) => { if (e.target === buyLayer) closeBuy(); });
-  addEventListener('keydown', (e) => { if (e.key === 'Escape' && !buyLayer.hidden) { e.stopImmediatePropagation(); closeBuy(); } }, true);
+  // fulfilled by the server's webhook (main.js forwards the socket's gems-grant)
+  addEventListener('cc:gems-grant', (e) => grant(e.detail || {}));
 }
+// HUD offer buttons (index.html data-arg) -> Boxity Gems sku
 export const OFFER_INFO = {
-  '2x-cash': { name: '2x Cash', price: 35, icon: 'assets/money-bag.svg' },
-  '2x-wins': { name: '2x Wins', price: 75, icon: 'assets/trophy.svg' },
-  'starter-pack': { name: 'Starter Pack', price: 25, icon: 'assets/starter-pack.svg' },
-  'fall-pack': { name: 'Fall Pack', price: 35, icon: 'assets/pack.svg' },
-  'limited-pack': { name: 'Limited Pack', price: 40, icon: 'assets/pack-limited.svg' }
+  '2x-cash': { name: '2x Cash', sku: 'pass_2x_cash', price: 35, icon: 'assets/money-bag.svg' },
+  '2x-wins': { name: '2x Wins', sku: 'pass_2x_wins', price: 75, icon: 'assets/trophy.svg' },
+  'starter-pack': { name: 'Starter Pack', sku: 'starter_pack', price: 25, icon: 'assets/starter-pack.svg' },
+  'fall-pack': { name: 'Fall Pack', sku: 'fall_pack_x1', price: 35, icon: 'assets/pack.svg' },
+  'limited-pack': { name: 'Limited Pack', sku: 'limited_pack_x1', price: 40, icon: 'assets/pack-limited.svg' }
 };

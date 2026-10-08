@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { LegionCharacter } from '../bloxity/legion-avatar.js';
-import { sdk, HOSTING_ID } from '../bloxity/legion-sdk.js';
+import { sdk, HOSTING_ID, reportPlayerJoined, reportPlayerInRoom } from '../bloxity/legion-sdk.js';
 import { getEmoteClip } from '../bloxity/legion-emotes.js';
 
 // Where the game socket goes. On Boxity every connect asks the matchmaker at play.bloxity.io for
@@ -8,6 +8,25 @@ import { getEmoteClip } from '../bloxity/legion-emotes.js';
 // A page on verity-quiz.dev.play.bloxity.io reaches the dev backend automatically.
 // Local runs (Vite proxy to localhost:3000) and a VITE_REALTIME_URL override skip the matchmaker.
 const LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[::1\]|192\.168\.|10\.)/;
+// Boxity's "Open Rooms" Join button and friend invites open the game with ?roomId=. The first connect
+// tries that room (resolved to its pod through the room directory); if it is gone or full we fall
+// back to normal matchmaking.
+let launchRoomId = new URLSearchParams(location.search).get('roomId');
+async function launchRoomEndpoint() {
+  const roomId = launchRoomId;
+  launchRoomId = null;                      // only the first connect
+  if (!roomId) return null;
+  try {
+    const response = await fetch(`https://play.bloxity.io/v1/dir/${encodeURIComponent(HOSTING_ID)}/list`);
+    const { rooms = [] } = await response.json();
+    const room = rooms.find((r) => (r.roomId || r.id) === roomId);
+    if (!room?.joinUrl || room.locked || (room.maxPlayers && room.players >= room.maxPlayers)) return null;
+    return { endpoint: room.joinUrl.replace(/^http/i, 'ws').replace(/\/$/, ''), roomId };
+  } catch (error) {
+    console.warn('[multiplayer] could not look up the invited room; matchmaking instead.', error.message);
+    return null;
+  }
+}
 async function realtimeUrl() {
   const override = import.meta.env.VITE_REALTIME_URL;
   const net = sdk()?.net;
@@ -16,10 +35,10 @@ async function realtimeUrl() {
     const url = new URL(override || `${protocol}//${location.host}/api/realtime`, location.href);
     if (url.protocol === 'https:') url.protocol = 'wss:';
     if (url.protocol === 'http:') url.protocol = 'ws:';
-    return url;
+    return { url, roomId: null };
   }
-  const { endpoint } = await net.resolveEndpoint(HOSTING_ID);
-  return new URL(`${endpoint}/api/realtime`);
+  const { endpoint, roomId } = (await launchRoomEndpoint()) || await net.resolveEndpoint(HOSTING_ID);
+  return { url: new URL(`${endpoint}/api/realtime`), roomId: roomId || null };
 }
 
 function newClientId() {
@@ -47,9 +66,9 @@ export function createMultiplayer(onMessage) {
     if (closed) return;
     if (attempted) window.dispatchEvent(new CustomEvent('cc:network-retry', { detail: { attempt: ++retries } }));
     attempted = true;
-    let url;
+    let url, roomId;
     try {
-      url = await realtimeUrl();
+      ({ url, roomId } = await realtimeUrl());
     } catch (error) {
       console.warn('[multiplayer] matchmaker unavailable; retrying.', error.message);
       window.dispatchEvent(new CustomEvent('cc:network', { detail: { connected: false } }));
@@ -62,7 +81,7 @@ export function createMultiplayer(onMessage) {
     socket = ws;
     ws.addEventListener('open', () => {
       retryDelay = 1000; retries = 0;
-      window.dispatchEvent(new CustomEvent('cc:network', { detail: { connected: true } }));
+      window.dispatchEvent(new CustomEvent('cc:network', { detail: { connected: true, roomId } }));
       window.dispatchEvent(new CustomEvent('cc:identify-request'));
     });
     ws.addEventListener('message', (event) => {
@@ -190,7 +209,10 @@ export function createRemotePlayers(scene) {
 
   function handleMessage(message) {
     if (message.type === 'snapshot') {
-      for (const player of message.players || []) updatePlayer(player);
+      for (const player of message.players || []) {
+        if (!remotePlayers.has(player.id)) reportPlayerInRoom(player.name);   // Boxity toasts friends already here
+        updatePlayer(player);
+      }
       for (const station of message.stations || []) {
         stations.set(station.stationId, station);
         window.dispatchEvent(new CustomEvent('cc:multiplayer-message', {
@@ -199,6 +221,7 @@ export function createRemotePlayers(scene) {
       }
       window.dispatchEvent(new CustomEvent('cc:stations', { detail: [...stations.values()] }));
     } else if (message.type === 'player-joined' || message.type === 'player-updated') {
+      if (message.type === 'player-joined') reportPlayerJoined(message.player?.name);
       updatePlayer(message.player);
     } else if (message.type === 'player-left') {
       const remote = remotePlayers.get(message.id);

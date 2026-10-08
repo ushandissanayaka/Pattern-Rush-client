@@ -748,6 +748,9 @@ body[data-match="voting"] .hud-left, body[data-match="building"] .hud-left { dis
 .pay__buy:disabled { opacity: .7; cursor: default; }
 .pay__legal { margin: 10px 0 0; text-align: center; font-size: 12px; color: #c9ccd2; }
 .pay__legal a { color: #fff; }
+.pay__opt[hidden], .pay__legal[hidden], .pay__error[hidden], .pay__old[hidden] { display: none; }
+div.pay__opt { cursor: default; }
+.pay__error { margin: 14px 0 -30px; font-size: 14px; font-weight: 700; color: #ff7a7a; text-align: center; }
 /* popup fixes */
 .pp__title { white-space: nowrap; }
 .pp--daily .pp__title { font-size: calc(48 * var(--u)); }
@@ -786,13 +789,69 @@ body[data-match="voting"] .hud-left, body[data-match="building"] .hud-left { dis
 .loading__status { position: absolute; left: 0; right: 0; bottom: 10px; margin: 0; text-align: center;
   font: 600 11px / 1.2 var(--f-body); color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, .45); }
 
-/* sound on / off — top-right corner, Roblox-style dark round button */
-.hud-sound { top: calc(18 * var(--u)); right: calc(18 * var(--u)); width: max(40px, calc(62 * var(--u))); height: max(40px, calc(62 * var(--u)));
-  display: grid; place-items: center; padding: 0; border: calc(3 * var(--u)) solid rgba(255, 255, 255, .85); border-radius: 50%;
-  background: rgba(20, 24, 32, .55); cursor: pointer; transition: transform .15s var(--ease-pop), background .15s; }
-.hud-sound:hover { transform: scale(1.08); background: rgba(20, 24, 32, .7); }
-.hud-sound svg { width: 62%; height: 62%; fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.hud-sound__speaker { fill: #fff; }
-.hud-sound__off { display: none; stroke: #ff5a5a; }
-.hud-sound.is-muted .hud-sound__waves { display: none; }
-.hud-sound.is-muted .hud-sound__off { display: inline; }
+/* top-right corner: Boxity profile chip */
+.hud-topright { top: max(calc(18 * var(--u)), env(safe-area-inset-top)); right: max(calc(18 * var(--u)), env(safe-area-inset-right));
+  display: flex; align-items: flex-start; gap: max(8px, calc(12 * var(--u))); z-index: 25; }
+
+/* ---- Boxity profile chip + menu (src/ui/profile.js) ---- */
+.profile { position: relative; }
+.profile__chip { display: flex; align-items: center; gap: max(8px, calc(10 * var(--u)));
+  height: max(40px, calc(62 * var(--u))); max-width: min(46vw, 260px); padding: 0 max(14px, calc(18 * var(--u))) 0 max(3px, calc(4 * var(--u)));
+  border: calc(3 * var(--u)) solid rgba(255, 255, 255, .85); border-radius: 999px; background: rgba(20, 24, 32, .55);
+  transition: transform .15s var(--ease-pop), background .15s; }
+.profile__chip:hover, .profile__chip[aria-expanded="true"] { transform: scale(1.04); background: rgba(20, 24, 32, .72); }
+.profile__pfp { flex: none; width: max(32px, calc(50 * var(--u))); height: max(32px, calc(50 * var(--u))); border-radius: 50%;
+  object-fit: cover; background: #2a2e44; border: 2px solid #fff; }
+.profile__text { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; text-align: left; line-height: 1.1; }
+.profile__name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: 700 max(14px, calc(22 * var(--u))) / 1.1 var(--f-hud); color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, .5); }
+.profile__sub { font: 600 max(11px, calc(15 * var(--u))) / 1.1 var(--f-hud); color: #c9f7c2; white-space: nowrap; }
+
+.profile-menu { position: absolute; top: calc(100% + 8px); right: 0; width: min(300px, calc(100vw - 32px)); max-height: calc(100vh - 90px);
+  overflow-y: auto; padding: 14px; border: 3px solid #fff; border-radius: 16px; background: rgba(22, 25, 36, .94);
+  box-shadow: 0 8px 0 rgba(0, 0, 0, .35); font-family: var(--f-body); color: #fff; user-select: text;
+  display: flex; flex-direction: column; gap: 10px; }
+.profile-menu__head { display: flex; align-items: center; gap: 12px; }
+.profile-menu__pfp { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; border: 3px solid #fff; background: #2a2e44; flex: none; }
+.profile-menu__who { min-width: 0; }
+.profile-menu__name { font: 700 19px / 1.15 var(--f-hud); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profile-menu__handle { font-size: 13px; color: #aab1c4; }
+.profile-menu__note { margin: 0; font-size: 13px; line-height: 1.35; color: #d9dde8; }
+.profile-menu__gems { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 12px; background: rgba(255, 255, 255, .08);
+  font: 700 18px / 1 var(--f-hud); }
+.profile-menu__gem { width: 24px; height: 24px; }
+.profile-menu__gems-label { color: #aab1c4; font-size: 14px; }
+.profile-menu__actions { display: flex; flex-direction: column; gap: 6px; }
+.profile-menu__btn { width: 100%; padding: 10px 12px; border-radius: 12px; background: rgba(255, 255, 255, .1); text-align: left;
+  font: 700 15px / 1 var(--f-hud); transition: background .15s; }
+.profile-menu__btn:hover { background: rgba(255, 255, 255, .18); }
+.profile-menu__btn:disabled { opacity: .6; cursor: default; }
+.profile-menu__btn--primary { text-align: center; color: #12300a; background: linear-gradient(180deg, var(--c-play-top), var(--c-play-bot)); border: 2px solid #12300a; }
+.profile-menu__btn--primary:hover { background: linear-gradient(180deg, var(--c-play-shine), var(--c-play-mid)); }
+.profile-menu__btn--quiet { text-align: center; color: #ffb4b4; background: transparent; }
+.profile-menu__section { margin-top: 2px; font: 700 13px / 1 var(--f-hud); color: #aab1c4; text-transform: uppercase; letter-spacing: .04em; }
+.profile-menu__friends { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.profile-menu__empty { font-size: 13px; color: #aab1c4; }
+.friend { display: flex; align-items: center; gap: 10px; }
+.friend__pic { position: relative; flex: none; }
+.friend__pfp { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; background: #2a2e44; }
+.friend__dot { position: absolute; right: -1px; bottom: -1px; width: 11px; height: 11px; border-radius: 50%; border: 2px solid #161924; background: #6b7280; }
+.friend__dot--online { background: #38e318; }
+.friend__dot--in-game { background: #3aa0ff; }
+.friend__dot--away { background: #ffd23a; }
+.friend__txt { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.friend__name { font: 700 14px / 1.2 var(--f-hud); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.friend__status { font-size: 12px; color: #aab1c4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.friend__invite { flex: none; padding: 6px 10px; border-radius: 10px; background: #2e5bff; font: 700 12px / 1 var(--f-hud); }
+.friend__invite:disabled { background: #3b4155; cursor: default; }
+
+/* Boxity setting show_fps */
+.hud-fps { left: 50%; top: 6px; transform: translateX(-50%); padding: 2px 8px; border-radius: 6px; background: rgba(0, 0, 0, .5);
+  font: 700 12px / 1.4 var(--f-body); color: #fff; pointer-events: none !important; }
+
+/* purchase result toast */
+.cc-toast { position: fixed; left: 50%; bottom: 14%; z-index: 80; transform: translateX(-50%); max-width: calc(100vw - 32px);
+  padding: 10px 18px; border-radius: 12px; border: 2px solid #fff; background: rgba(22, 25, 36, .92);
+  font: 700 15px / 1.3 var(--f-hud); color: #fff; text-align: center; pointer-events: none; }
+.cc-toast--ok { border-color: #38e318; }
+.cc-toast--err { border-color: #ff5a5a; }

@@ -7,13 +7,17 @@ import { moveCharacter, cameraClearance } from './scene/physics.js';
 import { createPost, lowPowerDevice } from './effects/post.js';
 import { CameraRig, CAMERA_LIMITS } from './controls/camera.js';
 import { initHud } from './ui/hud.js';
+import { initProfile } from './ui/profile.js';
 import { LegionCharacter } from './bloxity/legion-avatar.js';
-import { startLegion, onLocalPlayerChanged, getLocalPlayer, getToken, sdk } from './bloxity/legion-sdk.js';
+import {
+  startLegion, onLocalPlayerChanged, getLocalPlayer, getToken, sdk,
+  listenSetting, applyAllSettings, setFullscreen, gameplayStart, reportRoom
+} from './bloxity/legion-sdk.js';
 import { loadEmotes, getEmoteClip } from './bloxity/legion-emotes.js';
 import { createMatchSystem } from './game/match.js';
 import { createMultiplayer, createRemotePlayers } from './network/multiplayer.js';
 import { loadingStatus, finishLoading } from './ui/loading.js';
-import { initAudio, sfx, isMuted, setMuted } from './audio/sound.js';
+import { initAudio, sfx, setVolumes } from './audio/sound.js';
 
 const canvas = document.getElementById('world-canvas');
 const LOW = lowPowerDevice();
@@ -26,7 +30,7 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: !POST_FX, powerPre
 const FIXED_PR = parseFloat(new URLSearchParams(location.search).get('pr'));   // ?pr=1 pins resolution (screenshots)
 // Never drop below 1× on desktop (that is what made the scene look soft / blurry).
 const MAX_PR = FIXED_PR || Math.min(devicePixelRatio, LOW ? 1.25 : 2), MIN_PR = FIXED_PR || (LOW ? Math.min(0.8, MAX_PR) : 1);
-let pixelRatio = MAX_PR;
+let pixelRatio = MAX_PR, qualityCap = MAX_PR;   // qualityCap: Boxity setting graphics_quality
 renderer.setPixelRatio(pixelRatio);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.NoToneMapping; // Roblox look: saturated, untonemapped
@@ -101,8 +105,10 @@ sdk()?.player?.onEvent?.((event, data) => {
     respawn();
   }
 });
+let chatBubbles = true;   // Boxity setting enable_chat
 sdk()?.chat?.onMessage?.((m) => {
   const chat = sdk().chat;
+  if (!chatBubbles) return;
   // the local avatar has no name tag; other players' bubbles sit just above theirs
   const character = m.isLocalPlayer ? me : remotePlayers.getCharacterByUserId(String(m.userId || '').replace(/^legion_/, ''));
   if (!character) return;
@@ -248,15 +254,7 @@ function walk(dt) {
 // Camera is paused while a modal / match screen is open (no stray orbiting behind panels).
 
 initHud();
-// sound on / off (top-right button, or the M key)
-const soundButton = document.getElementById('btn-sound');
-const showSoundState = () => {
-  soundButton.classList.toggle('is-muted', isMuted());
-  soundButton.setAttribute('aria-pressed', String(isMuted()));
-  soundButton.setAttribute('aria-label', isMuted() ? 'Sound off. Turn sound on (M)' : 'Sound on. Turn sound off (M)');
-};
-soundButton.addEventListener('click', (e) => { e.stopPropagation(); if (e.detail > 0) soundButton.blur(); setMuted(!isMuted()); });
-addEventListener('cc:muted', showSoundState); showSoundState();
+initProfile();
 if (import.meta.env.DEV) window.__cc = { rig, feet, vel, state, respawn, renderer, scene, sun, me, post, get pixelRatio() { return pixelRatio; } }; // dev-only debug handle (tests)
 
 function resize() {
@@ -347,15 +345,37 @@ renderer.setAnimationLoop(() => {
   perf.t += clock.elapsedTime - perf.last; perf.last = clock.elapsedTime; perf.n++;
   if (perf.t >= 1) {
     const ms = (perf.t / perf.n) * 1000; perf.t = 0; perf.n = 0;
+    if (!fpsLabel.hidden) fpsLabel.textContent = `${Math.round(1000 / ms)} FPS`;
     perf.slow = ms > 22 ? perf.slow + 1 : 0;
     let next = pixelRatio;
     if (perf.slow >= 2 && post.enabled && !post.lite) { useLiteRendering(); perf.slow = 0; }
     else if (perf.slow >= 2 && pixelRatio > MIN_PR) { next = Math.max(MIN_PR, pixelRatio - 0.15); perf.slow = 0; }
-    else if (ms < 13 && pixelRatio < MAX_PR) next = Math.min(MAX_PR, pixelRatio + 0.15);
+    else if (ms < 13 && pixelRatio < qualityCap) next = Math.min(qualityCap, pixelRatio + 0.15);
+    if (next > qualityCap) next = qualityCap;
     if (next !== pixelRatio) { pixelRatio = next; renderer.setPixelRatio(pixelRatio); resize(); }
   }
 });
 document.body.dataset.ready = '1';
+
+// --- Boxity portal settings (string values; listening adds each control to the portal menu) ---
+const fpsLabel = document.getElementById('hud-fps');
+const settingNumber = (value, fallback) => { const n = parseFloat(value); return Number.isFinite(n) ? n : fallback; };
+listenSetting('master_volume', (v) => setVolumes({ master: settingNumber(v, 80) / 100 }));
+listenSetting('music_volume', (v) => setVolumes({ music: settingNumber(v, 80) / 100 }));
+listenSetting('graphics_quality', (v) => {
+  // post-processing is off on low-power devices (and with ?nobloom): only the resolution cap applies
+  if (post.enabled) { if (v === 'Low' || v === 'Medium') useLiteRendering(); else post.setLite(false); }
+  qualityCap = v === 'Low' ? Math.min(MAX_PR, 1) : v === 'Medium' ? Math.min(MAX_PR, 1.25) : MAX_PR;
+  if (pixelRatio > qualityCap) { pixelRatio = Math.max(MIN_PR, qualityCap); renderer.setPixelRatio(pixelRatio); resize(); }
+});
+listenSetting('show_fps', (v) => { fpsLabel.hidden = v !== 'true'; });
+listenSetting('camera_sensitivity', (v) => { rig.sensitivity = Math.min(5, Math.max(0.1, settingNumber(v, 1))); });
+listenSetting('enable_chat', (v) => { chatBubbles = v !== 'false'; });
+listenSetting('fullscreen', (v) => setFullscreen(v === 'true'));
+applyAllSettings();
+
+// The lobby you are connected to is joinable: Boxity invites / "Open Rooms" send friends into it.
+addEventListener('cc:network', (e) => reportRoom(e.detail.connected ? e.detail.roomId : ''));
 
 // Loading screen: wait for your avatar (with a time limit, so a slow CDN never blocks the game) and
 // for the server; while the server is unavailable (e.g. Render waking up) show the retry count.
@@ -378,4 +398,5 @@ const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
   }
   await nextFrame();
   finishLoading();
+  gameplayStart();
 })();
