@@ -1,6 +1,10 @@
 // 3D world colours, pixel-sampled from the reference video and the in-game
 // screenshots (client/docs/DESIGN.md "Colour tokens"). Sky colours: scene/sky.js.
 // HUD colours live in index.css :root; keep the two in sync.
+// Overall scene brightness: scales the sun + sky light and the unlit neon strips alike, so every
+// lit surface renders a little darker than its palette colour (1 = exact palette colours).
+export const SCENE_BRIGHTNESS = 0.8;
+
 export const C = {
   // ground
   grassA: '#3bd366', grassB: '#45db73', islandSide: '#5c6468', islandSideDark: '#535b5f', islandRim: '#6b7478',
