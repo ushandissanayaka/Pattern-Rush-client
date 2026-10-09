@@ -11,6 +11,7 @@ import { STATIONS, SHELF, shelfSlotZ, setShelfSlots } from '../scene/world.js';
 import { showScreen } from '../ui/hud.js';
 import { openBuy } from '../ui/popups.js';
 import { sfx } from '../audio/sound.js';
+import { CAMERA_LIMITS } from '../controls/camera.js';
 import { LegionCharacter, LEGION_CDN } from '../bloxity/legion-avatar.js';
 import { TOKENS, TOKEN, PATTERN_LENGTH, randomPattern, tokenIcon, tokenMesh } from './tokens.js';
 
@@ -27,6 +28,10 @@ const CHAR_SCALE = 1.5;          // characters are bigger inside the playing pla
 const BAR_SIZE = SHELF.objectSize, BAR_X = SHELF.objectX, BAR_Y = SHELF.y0 + BAR_SIZE * 0.47;
 const IDLE_Z = 12;               // stand at the left end, beside the panels
 const CAM_LOCAL = new THREE.Vector3(33, 15, 0), LOOK_LOCAL = new THREE.Vector3(0, 13.5, 0);
+// The booth view is framed for a 16:9 screen. Narrower screens (portrait phones) pull the camera
+// back (at most MAX_PULL×, it stays in front of the booth across the road) and widen the FOV for
+// the rest, so the whole deck, ledge and code shelf stay in view.
+const FRAME_ASPECT = 16 / 9, MAX_PULL = 2.3, BASE_FOV = CAMERA_LIMITS.fov;
 // Gems items in a match (purchase popup: ui/buy-popup.js); price = label until the catalog price loads
 const ITEMS = {
   reset: { sku: 'troll_reset_shuffle', name: 'Shuffle and Reset (OP)', price: 49, icon: 'assets/icon-shuffle.svg' },
@@ -1043,7 +1048,11 @@ export function createMatchSystem({ scene, camera, me, feet, state, getName, mul
       const view = phase === 'watching' ? views.get(watchId) : null;
       const half = view ? (view.turn || view.winner || view.players.red).half : M && M.turn ? M.turn.half : null;
       if (!half) return;
-      W(half, CAM_LOCAL.x, CAM_LOCAL.y, CAM_LOCAL.z, tmpA); W(half, LOOK_LOCAL.x, LOOK_LOCAL.y, LOOK_LOCAL.z, tmpB);
+      const fit = Math.max(1, FRAME_ASPECT / camera.aspect), pull = Math.min(MAX_PULL, fit);
+      const fov = THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(BASE_FOV / 2)) * fit / pull));
+      if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
+      tmpA.subVectors(CAM_LOCAL, LOOK_LOCAL).multiplyScalar(pull).add(LOOK_LOCAL);
+      W(half, tmpA.x, tmpA.y, tmpA.z, tmpA); W(half, LOOK_LOCAL.x, LOOK_LOCAL.y, LOOK_LOCAL.z, tmpB);
       if (!camInit) { camPos.copy(camera.position); camLook.copy(tmpB); camInit = true; }
       const k = 1 - Math.exp(-dt * 4);
       camPos.lerp(tmpA, k); camLook.lerp(tmpB, k);
