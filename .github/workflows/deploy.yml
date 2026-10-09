@@ -1,0 +1,67 @@
+# Pattern Rush client -> Bloxity frontend hosting
+#   dev  -> https://<GAME_ID>.dev.play.bloxity.io
+#   main -> https://<GAME_ID>.play.bloxity.io
+# Needs: secret LEGION_DEPLOY_TOKEN, variable LEGION_GAME_ID
+
+name: Deploy client to Bloxity
+
+on:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-client-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check token and game id
+        env:
+          LEGION_TOKEN: ${{ secrets.LEGION_DEPLOY_TOKEN }}
+          GAME_ID: ${{ vars.LEGION_GAME_ID }}
+        run: |
+          [ -n "$GAME_ID" ] || { echo "::error::LEGION_GAME_ID variable is not set."; exit 1; }
+          [ -n "$LEGION_TOKEN" ] || { echo "::error::LEGION_DEPLOY_TOKEN secret is not set."; exit 1; }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22   # zip-dist.mjs uses zlib.crc32 (Node 22+)
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build and zip
+        id: build
+        run: |
+          if [ "$GITHUB_REF_NAME" = "dev" ]; then
+            npm run zip:dev;  echo "channel=dev"  >> "$GITHUB_OUTPUT"; echo "zip=release/pattern-rush-client-dev.zip"  >> "$GITHUB_OUTPUT"
+          else
+            npm run zip:prod; echo "channel=prod" >> "$GITHUB_OUTPUT"; echo "zip=release/pattern-rush-client-prod.zip" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload frontend
+        env:
+          LEGION_TOKEN: ${{ secrets.LEGION_DEPLOY_TOKEN }}
+          GAME_ID: ${{ vars.LEGION_GAME_ID }}
+          CHANNEL: ${{ steps.build.outputs.channel }}
+          ZIP: ${{ steps.build.outputs.zip }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_SHA::7}"
+          body="$(mktemp)"
+          code="$(curl -sS -o "$body" -w '%{http_code}' -X POST \
+            "https://api.bloxity.io/v1/hosting/games/${GAME_ID}/frontend?channel=${CHANNEL}&version=${version}" \
+            -H "Authorization: Bearer ${LEGION_TOKEN}" \
+            -H "Content-Type: application/zip" \
+            --data-binary "@${ZIP}")"
+          echo "Bloxity answered HTTP ${code}:"; cat "$body"; echo
+          case "$code" in 2*) ;; *) exit 1 ;; esac
+          if [ "$CHANNEL" = "dev" ]; then echo "Live: https://${GAME_ID}.dev.play.bloxity.io"; else echo "Live: https://${GAME_ID}.play.bloxity.io"; fi
