@@ -12,9 +12,8 @@
 //
 // Units are studs. +X is to your LEFT when you face the leaderboards from the spawn.
 import * as THREE from 'three';
-import { C } from '../config/palette.js';
+import { C, SCENE_BRIGHTNESS } from '../config/palette.js';
 import { addCollider, addColliderBox } from './physics.js';
-import { BLOOM_THRESHOLD } from '../effects/post.js';
 import { mergeStatic } from './optimize.js';
 import { faceBallTexture } from '../game/tokens.js';
 
@@ -52,15 +51,12 @@ function mat(color, opts = {}) {
   if (!mats.has(key)) mats.set(key, matte({ color, roughness: 0.85, metalness: 0, ...opts }));
   return mats.get(key);
 }
-// Neon: tagged for selective bloom (effects/post.js) → glows like Roblox Neon material
-// Neon: emissive bright enough (brightest channel above BLOOM_THRESHOLD) to glow in the
-// single bloom pass; `glow` sets how far above the threshold → halo strength.
-function neon(color, k = 1.3, glow = 0.55) {
-  const c = new THREE.Color(color);
-  const peak = Math.max(0.05, c.r, c.g, c.b);   // bloom thresholds on the brightest channel
-  const m = mat(color, { emissive: color, emissiveIntensity: Math.max(k * 0.5, (BLOOM_THRESHOLD + 0.2 + glow * 0.6) / peak) });
-  m.userData.neon = true;
-  return m;
+// Neon (booth trims, pad lines, wheel ring, leaderboard edges, lasers): flat, unlit colour so the
+// strips stay bright in shade, without any glow halo around them.
+const neonMats = new Map();
+function neon(color) {
+  if (!neonMats.has(color)) neonMats.set(color, new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(SCENE_BRIGHTNESS) }));   // same darkening as lit surfaces
+  return neonMats.get(color);
 }
 
 // Long, thin, low trims (neon strips, ledge lips, curbs, pad frames, rims) cast long thin shadows at
@@ -269,7 +265,7 @@ const padMats = { red: matte({ map: studTex(C.padRed), roughness: 0.6 }), blue: 
 function booth(side, z, trim, state, parent, seam = 1) {
   const g = new THREE.Group();
   const white = mat(C.boothWhite), inner = boothWallMats[trim];
-  const nm = neon(trim === 'red' ? C.trimRed : C.trimCyan, 1.3, 0.35);   // thin strips, softer glow
+  const nm = neon(trim === 'red' ? C.trimRed : C.trimCyan);
   // local frame: +X faces the road
   box(BOOTH_D, 1, BOOTH_W, white, 0, 0.5, 0, g);                                      // floor
   box(1.5, BOOTH_H, BOOTH_W - 2, inner, -BOOTH_D / 2 + 1.5, BOOTH_H / 2, 0, g);        // back wall
@@ -334,13 +330,13 @@ function spawnPad(parent) {
   noShadow(box(S - 0.1, 0.35, S - 0.1, mat('#8cdc99'), p.x, 0.18, p.z, parent, false)).userData.class = 'spawn-pad';  // pale green glass (inset inside the frame)
   for (const [w, d, x, z] of [[S, 0.9, 0, S / 2 - 0.45], [S, 0.9, 0, -S / 2 + 0.45], [0.9, S, S / 2 - 0.45, 0], [0.9, S, -S / 2 + 0.45, 0]])
     noShadow(box(w, 0.55, d, frame, p.x + x, 0.28, p.z + z, parent, false));                                      // grey outer frame
-  const line = neon('#ffffff', 0.6, 0.16), L = S - 3.4;
+  const line = neon('#ffffff'), L = S - 3.4;
   for (const [w, d, x, z] of [[L, 0.4, 0, L / 2], [L, 0.4, 0, -L / 2], [0.4, L, L / 2, 0], [0.4, L, -L / 2, 0]])
     box(w, 0.42, d, line, p.x + x, 0.22, p.z + z, parent, false);                                       // glowing inset line
   const tile = new THREE.Mesh(new THREE.BoxGeometry(9, 0.45, 9),
     [mat('#e9ecea'), mat('#e9ecea'), matte({ map: sunTex }), mat('#e9ecea'), mat('#e9ecea'), mat('#e9ecea')]);
   tile.position.set(p.x, 0.25, p.z); tile.receiveShadow = true; parent.add(tile);
-  const tileGlow = neon('#ffffff', 0.35, 0.12);
+  const tileGlow = neon('#ffffff');
   for (const [w, d, x, z] of [[9.6, 0.3, 0, 4.7], [9.6, 0.3, 0, -4.7], [0.3, 9.6, 4.7, 0], [0.3, 9.6, -4.7, 0]])
     box(w, 0.47, d, tileGlow, p.x + x, 0.24, p.z + z, parent, false);
 }
@@ -378,7 +374,7 @@ function wheelSpin(parent) {
   box(5, 2.6, 4, mat('#4a6fa8'), 0, 1.3, 0, g);
   box(2.6, H - R - 1, 2.2, mat('#4a6fa8'), 0, (H - R - 1) / 2 + 2.6, 0, g, false);
   // glowing cyan circle on the floor, centred on the stand
-  const ring = new THREE.Mesh(new THREE.RingGeometry(12.2, 13.2, 72), neon(C.padCyan, 1.0, 0.5)); ring.rotation.x = -Math.PI / 2; ring.position.set(0, 0.12, 15); g.add(ring);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(12.2, 13.2, 72), neon(C.padCyan)); ring.rotation.x = -Math.PI / 2; ring.position.set(0, 0.12, 15); g.add(ring);
   const glow = new THREE.Mesh(new THREE.CircleGeometry(12.2, 72), new THREE.MeshBasicMaterial({ color: '#27c0b8', transparent: true, opacity: 0.42 }));
   glow.rotation.x = -Math.PI / 2; glow.position.set(0, 0.1, 15); g.add(glow);
   const t1 = textSprite([{ text: 'WHEEL SPIN', color: C.textWheel, size: 100 }, sub('Free spin every day!', '#ffffff', 56)], 4.6);
@@ -599,7 +595,7 @@ function leaderboard(title, icon, valueColor, rows, x, countdownStart, parent) {
   panel.position.set(0, footH / 2, FACE_Z); board.add(panel);
   const footer = new THREE.Mesh(new THREE.PlaneGeometry(18.6, footH), new THREE.MeshBasicMaterial({ map: footTex, toneMapped: false }));
   footer.position.set(0, -PANEL_H / 2 + footH / 2, FACE_Z); footer.userData.dynamic = true; board.add(footer);
-  const nG = neon(C.lbNeon, 1.2);   // neon green edge glow (right + top)
+  const nG = neon(C.lbNeon);   // neon green edge (right + top)
   box(0.7, 26.6, 0.7, nG, 11.2, 0, -0.6, board, false); box(22.4, 0.7, 0.7, nG, 0, 13.2, -0.6, board, false);
   board.position.y = 16; board.rotation.x = -0.08; g.add(board);
   box(24, 3, 4, mat(C.lbBase), 0, 1.5, 0, g);
@@ -609,7 +605,7 @@ function leaderboard(title, icon, valueColor, rows, x, countdownStart, parent) {
 }
 function pedestal(x, parent) {
   box(6.5, 3, 6.5, mat(C.pedestal), x, 1.5, 63, parent);
-  box(7, 0.6, 7, neon(C.lbNeon, 1.1, -0.25), x, 3.3, 63, parent, false);   // soft glow: dancers stand on it
+  box(7, 0.6, 7, neon(C.lbNeon), x, 3.3, 63, parent, false);   // dancers stand on it
   return new THREE.Vector3(x, 3.6, 63);
 }
 
@@ -630,7 +626,7 @@ function smileyTex(base) {
 }
 const ballMat = matte({ map: smileyTex('#f8e21a') });
 const redBallMat = matte({ map: smileyTex('#e8141f') });
-const laserMat = neon(C.laser, 1.6);
+const laserMat = neon(C.laser);
 const rimMat = mat('#4f5659'), platGrass = () => matte({ map: checker('#55d977', '#4fd070', 2, 1) });
 
 function glassCube(x, y, z, s, parent, rot = 0) {

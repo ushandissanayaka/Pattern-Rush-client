@@ -4,7 +4,6 @@ import { buildWorld, tickWorld, BILLBOARDS, WORLD, CONVEYORS, CONVEYOR_SPEED, DA
 import { createDancers } from './scene/dancers.js';
 import { createSky } from './scene/sky.js';
 import { moveCharacter, cameraClearance } from './scene/physics.js';
-import { createPost, lowPowerDevice } from './effects/post.js';
 import { CameraRig, CAMERA_LIMITS } from './controls/camera.js';
 import { initHud } from './ui/hud.js';
 import { initProfile } from './ui/profile.js';
@@ -18,19 +17,19 @@ import { createMatchSystem } from './game/match.js';
 import { createMultiplayer, createRemotePlayers } from './network/multiplayer.js';
 import { loadingStatus, finishLoading } from './ui/loading.js';
 import { initAudio, sfx, setVolumes } from './audio/sound.js';
+import { SCENE_BRIGHTNESS } from './config/palette.js';
 
 const canvas = document.getElementById('world-canvas');
-const LOW = lowPowerDevice();
-const POST_FX = !LOW && !location.search.includes('nobloom');
-// With post-processing the scene is antialiased in the composer's 4× MSAA target; the canvas
-// itself only receives a full-screen quad, so its own MSAA would be pure extra GPU work.
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: !POST_FX, powerPreference: 'high-performance' });
+// phones / tablets and machines with ≤ 4 cores get a lower resolution cap and a smaller shadow map
+const LOW = (navigator.maxTouchPoints > 0 && Math.min(screen.width, screen.height) < 820) || (navigator.hardwareConcurrency || 8) <= 4;
+// No post-processing (no bloom glow): the scene is drawn straight to the antialiased canvas.
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 // Adaptive resolution: start at up to 1.5× (2× is rarely visible but costs ~78 % more
 // pixels) and step down / up to hold ~60 fps (see the frame loop below).
 const FIXED_PR = parseFloat(new URLSearchParams(location.search).get('pr'));   // ?pr=1 pins resolution (screenshots)
 // Never drop below 1× on desktop (that is what made the scene look soft / blurry).
 // Phones: up to 1.5× and never under 1× — below that the pixel-art skins turn into a smear on
-// 2–3× screens (post-processing is already off there, so the extra pixels are cheap).
+// 2–3× screens.
 const MAX_PR = FIXED_PR || Math.min(devicePixelRatio, LOW ? 1.5 : 2), MIN_PR = FIXED_PR || Math.min(1, MAX_PR);
 let pixelRatio = MAX_PR, qualityCap = MAX_PR;   // qualityCap: Boxity setting graphics_quality
 renderer.setPixelRatio(pixelRatio);
@@ -47,7 +46,8 @@ const camera = new THREE.PerspectiveCamera(CAMERA_LIMITS.fov, 1, 0.3, 3000);
 const SUN_DIR = new THREE.Vector3(0.6, 0.66, 0.42).normalize();
 // Calibrated so an upward face renders at its palette colour (like Roblox):
 // (hemi + sun·cosθ) / π ≈ 1. Shadowed ground keeps only the hemisphere fill (≈ 58 % in sRGB).
-const HEMI = 1.0, UP_LIGHT = 3.06;
+// SCENE_BRIGHTNESS (< 1) darkens everything evenly.
+const HEMI = 1.0 * SCENE_BRIGHTNESS, UP_LIGHT = 3.06 * SCENE_BRIGHTNESS;
 scene.add(new THREE.HemisphereLight('#ffffff', '#c9d2cc', HEMI));
 const sun = new THREE.DirectionalLight('#fffaf0', (UP_LIGHT - HEMI) / SUN_DIR.y);
 sun.castShadow = true;
@@ -56,7 +56,6 @@ Object.assign(sun.shadow.camera, { left: -90, right: 90, top: 90, bottom: -90, n
 sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.05; sun.shadow.radius = 1.4;   // soft Roblox-like edges
 scene.add(sun, sun.target);
 const sky = createSky(scene, SUN_DIR);
-const post = createPost(renderer, scene, camera, POST_FX);
 
 startLegion();
 initAudio();   // sounds + music render in the background while the world loads
@@ -257,11 +256,11 @@ function walk(dt) {
 
 initHud();
 initProfile();
-if (import.meta.env.DEV) window.__cc = { rig, feet, vel, state, respawn, renderer, scene, sun, me, post, get pixelRatio() { return pixelRatio; } }; // dev-only debug handle (tests)
+if (import.meta.env.DEV) window.__cc = { rig, feet, vel, state, respawn, renderer, scene, sun, me, get pixelRatio() { return pixelRatio; } }; // dev-only debug handle (tests)
 
 function resize() {
   const w = canvas.clientWidth, h = canvas.clientHeight;
-  renderer.setSize(w, h, false); post.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
 }
 new ResizeObserver(resize).observe(canvas); resize();
 
@@ -276,8 +275,8 @@ if (import.meta.env.DEV) window.__match = match;
 const clock = new THREE.Clock();
 const wp = new THREE.Vector3(), shadowFocus = new THREE.Vector3();
 const perf = { t: 0, n: 0, last: 0, slow: 0, fast: 0, tooSlow: Infinity, on: false };
+// lite rendering: a 1024 shadow map (nearly the same look, a fraction of the GPU cost)
 function useLiteRendering() {
-  post.setLite(true);
   if (sun.shadow.mapSize.x > 1024) { sun.shadow.map?.dispose(); sun.shadow.map = null; sun.shadow.mapSize.set(1024, 1024); }
 }
 let networkElapsed = 0, networkIdle = 0, lastMoveKey = '';
@@ -343,11 +342,10 @@ renderer.setAnimationLoop(() => {
     b.material.opacity = THREE.MathUtils.smoothstep(wp.distanceTo(camera.position), 16, 36);
   }
   dancers.update(dt, camera);
-  post.render();
+  renderer.render(scene, camera);
 
   // adaptive quality: average frame time over ~1 s. After two slow seconds in a row, first switch
-  // to lite rendering once (FXAA instead of 4× MSAA, 1024 shadow map — nearly the same look, a
-  // fraction of the GPU cost); only if it is still slow, step the pixel ratio down by 0.15.
+  // to lite rendering once (smaller shadow map); only if it is still slow, step the pixel ratio down by 0.15.
   // Steady ~60 fps for 4 s steps it back up (60 Hz phones never get under 13 ms), but never to a
   // level that was already too slow. Loading frames (shader compiles, avatar downloads) don't count.
   perf.t += clock.elapsedTime - perf.last; perf.last = clock.elapsedTime; perf.n++;
@@ -357,7 +355,7 @@ renderer.setAnimationLoop(() => {
     perf.slow = perf.on && ms > 22 ? perf.slow + 1 : 0;
     perf.fast = perf.on && ms < 18 ? perf.fast + 1 : 0;
     let next = pixelRatio;
-    if (perf.slow >= 2 && post.enabled && !post.lite) { useLiteRendering(); perf.slow = 0; }
+    if (perf.slow >= 2 && sun.shadow.mapSize.x > 1024) { useLiteRendering(); perf.slow = 0; }
     else if (perf.slow >= 2 && pixelRatio > MIN_PR) { perf.tooSlow = Math.min(perf.tooSlow, pixelRatio); next = Math.max(MIN_PR, pixelRatio - 0.15); perf.slow = 0; }
     else if (perf.fast >= 4 && pixelRatio < qualityCap && pixelRatio + 0.15 < perf.tooSlow) { next = Math.min(qualityCap, pixelRatio + 0.15); perf.fast = 0; }
     if (next > qualityCap) next = qualityCap;
@@ -372,8 +370,7 @@ const settingNumber = (value, fallback) => { const n = parseFloat(value); return
 listenSetting('master_volume', (v) => setVolumes({ master: settingNumber(v, 80) / 100 }));
 listenSetting('music_volume', (v) => setVolumes({ music: settingNumber(v, 80) / 100 }));
 listenSetting('graphics_quality', (v) => {
-  // post-processing is off on low-power devices (and with ?nobloom): only the resolution cap applies
-  if (post.enabled) { if (v === 'Low' || v === 'Medium') useLiteRendering(); else post.setLite(false); }
+  if (v === 'Low' || v === 'Medium') useLiteRendering();
   qualityCap = v === 'Low' ? Math.min(MAX_PR, 1) : v === 'Medium' ? Math.min(MAX_PR, 1.25) : MAX_PR;
   if (pixelRatio > qualityCap) { pixelRatio = Math.max(MIN_PR, qualityCap); renderer.setPixelRatio(pixelRatio); resize(); }
 });

@@ -1,5 +1,5 @@
 // Static-geometry batching. The lobby is ~1000 small boxes / cones / blobs; drawn
-// one by one that is >800 draw calls per pass (×3 passes with shadows + bloom).
+// one by one that is >800 draw calls per pass (×2 passes with shadows).
 // Every mesh that never moves is baked into world space and merged with all
 // other meshes that use the same material, so each material is ONE draw call.
 // Anything under an object with userData.dynamic = true (animated parts) is left alone.

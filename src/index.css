@@ -503,14 +503,6 @@ body[data-match="voting"] .hud-left, body[data-match="building"] .hud-left { dis
 /* top: "NAME's turn... 20s" */
 .mm-turn { left: 50%; top: calc(10 * var(--u)); transform: translateX(-50%); font: 900 calc(50 * var(--u)) / 1.1 var(--f-match); color: #fff; white-space: nowrap;
   max-width: calc(100vw - 32px); overflow: hidden; text-overflow: ellipsis; }
-/* small screens: the profile chip shares the top edge with the turn line, so it steps aside during a match */
-@media (max-width: 1000px), (max-height: 500px) {
-  body[data-match="playing"] .hud-topright, body[data-match="watching"] .hud-topright { display: none; }
-}
-/* short landscape screens have no room above the Guess panel: REVEAL moves to the free top-right corner */
-@media (max-height: 500px) and (orientation: landscape) {
-  .mm-reveal { left: auto; right: max(16px, env(safe-area-inset-right)); top: calc(26 * var(--u)); transform: none; }
-}
 
 
 .mm-toast { left: 50%; top: 40%; transform: translateX(-50%); font: 900 calc(40 * var(--u)) / 1 var(--f-match); color: #fff; }
@@ -526,6 +518,20 @@ body[data-match="voting"] .hud-left, body[data-match="building"] .hud-left { dis
 .mm-reveal { top: calc(31% - 205 * var(--u)); }
 .mm-submit { top: calc(31% + 110 * var(--u)); }
 .mm-repeat { top: calc(31% - 60 * var(--u)); }
+/* small screens: Boxity's own buttons and the profile chip sit along the top edge, so the turn line
+   (and the spectator panel) start below that row instead of on top of it */
+@media (max-width: 1000px), (max-height: 500px) {
+  .mm-turn { top: max(54px, calc(env(safe-area-inset-top) + 46px)); }
+  .mm > .mm-watch { top: max(60px, calc(env(safe-area-inset-top) + 52px)); }   /* .mm > : outranks the base rule below */
+}
+/* short landscape: everything under the turn line moves down by the same amount, and REVEAL goes to
+   the right edge under the profile chip (there is no room for it above the Guess panel) */
+@media (max-height: 500px) and (orientation: landscape) {
+  .mm-guess { top: calc(31% + 30px); }
+  .mm-submit { top: calc(31% + 30px + 110 * var(--u)); }
+  .mm-repeat { top: calc(31% + 30px - 60 * var(--u)); }
+  .mm-reveal { left: auto; right: max(16px, env(safe-area-inset-right)); top: max(60px, calc(env(safe-area-inset-top) + 52px)); transform: none; }
+}
 
 /* spectator panel: both players' cracked objects, whose turn it is, and the queue */
 .mm-watch { left: 16px; top: 16px; flex-direction: column; align-items: stretch; gap: calc(10 * var(--u));
