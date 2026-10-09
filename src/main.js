@@ -29,7 +29,9 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: !POST_FX, powerPre
 // pixels) and step down / up to hold ~60 fps (see the frame loop below).
 const FIXED_PR = parseFloat(new URLSearchParams(location.search).get('pr'));   // ?pr=1 pins resolution (screenshots)
 // Never drop below 1× on desktop (that is what made the scene look soft / blurry).
-const MAX_PR = FIXED_PR || Math.min(devicePixelRatio, LOW ? 1.25 : 2), MIN_PR = FIXED_PR || (LOW ? Math.min(0.8, MAX_PR) : 1);
+// Phones: up to 1.5× and never under 1× — below that the pixel-art skins turn into a smear on
+// 2–3× screens (post-processing is already off there, so the extra pixels are cheap).
+const MAX_PR = FIXED_PR || Math.min(devicePixelRatio, LOW ? 1.5 : 2), MIN_PR = FIXED_PR || Math.min(1, MAX_PR);
 let pixelRatio = MAX_PR, qualityCap = MAX_PR;   // qualityCap: Boxity setting graphics_quality
 renderer.setPixelRatio(pixelRatio);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -273,7 +275,7 @@ remotePlayers.setControlFilter(match.controlsRemote);
 if (import.meta.env.DEV) window.__match = match;
 const clock = new THREE.Clock();
 const wp = new THREE.Vector3(), shadowFocus = new THREE.Vector3();
-const perf = { t: 0, n: 0, last: 0, slow: 0 };
+const perf = { t: 0, n: 0, last: 0, slow: 0, fast: 0, tooSlow: Infinity, on: false };
 function useLiteRendering() {
   post.setLite(true);
   if (sun.shadow.mapSize.x > 1024) { sun.shadow.map?.dispose(); sun.shadow.map = null; sun.shadow.mapSize.set(1024, 1024); }
@@ -319,7 +321,11 @@ renderer.setAnimationLoop(() => {
   }
 
   if (match.cameraActive()) { match.updateCamera(dt); me.root.visible = true; }
-  else { const firstPerson = rig.update(dt, feet); me.root.visible = !firstPerson; }
+  else {
+    // the booth camera widens the FOV on narrow screens; the lobby camera always uses the standard one
+    if (camera.fov !== CAMERA_LIMITS.fov) { camera.fov = CAMERA_LIMITS.fov; camera.updateProjectionMatrix(); }
+    const firstPerson = rig.update(dt, feet); me.root.visible = !firstPerson;
+  }
   // shadow frustum follows the player, snapped to whole shadow texels so edges don't shimmer
   const span = rig.dist > 110 ? 200 : rig.dist > 50 ? 130 : 90;
   if (sun.shadow.camera.right !== span) {
@@ -342,15 +348,18 @@ renderer.setAnimationLoop(() => {
   // adaptive quality: average frame time over ~1 s. After two slow seconds in a row, first switch
   // to lite rendering once (FXAA instead of 4× MSAA, 1024 shadow map — nearly the same look, a
   // fraction of the GPU cost); only if it is still slow, step the pixel ratio down by 0.15.
+  // Steady ~60 fps for 4 s steps it back up (60 Hz phones never get under 13 ms), but never to a
+  // level that was already too slow. Loading frames (shader compiles, avatar downloads) don't count.
   perf.t += clock.elapsedTime - perf.last; perf.last = clock.elapsedTime; perf.n++;
   if (perf.t >= 1) {
     const ms = (perf.t / perf.n) * 1000; perf.t = 0; perf.n = 0;
     if (!fpsLabel.hidden) fpsLabel.textContent = `${Math.round(1000 / ms)} FPS`;
-    perf.slow = ms > 22 ? perf.slow + 1 : 0;
+    perf.slow = perf.on && ms > 22 ? perf.slow + 1 : 0;
+    perf.fast = perf.on && ms < 18 ? perf.fast + 1 : 0;
     let next = pixelRatio;
     if (perf.slow >= 2 && post.enabled && !post.lite) { useLiteRendering(); perf.slow = 0; }
-    else if (perf.slow >= 2 && pixelRatio > MIN_PR) { next = Math.max(MIN_PR, pixelRatio - 0.15); perf.slow = 0; }
-    else if (ms < 13 && pixelRatio < qualityCap) next = Math.min(qualityCap, pixelRatio + 0.15);
+    else if (perf.slow >= 2 && pixelRatio > MIN_PR) { perf.tooSlow = Math.min(perf.tooSlow, pixelRatio); next = Math.max(MIN_PR, pixelRatio - 0.15); perf.slow = 0; }
+    else if (perf.fast >= 4 && pixelRatio < qualityCap && pixelRatio + 0.15 < perf.tooSlow) { next = Math.min(qualityCap, pixelRatio + 0.15); perf.fast = 0; }
     if (next > qualityCap) next = qualityCap;
     if (next !== pixelRatio) { pixelRatio = next; renderer.setPixelRatio(pixelRatio); resize(); }
   }
@@ -399,4 +408,5 @@ const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
   await nextFrame();
   finishLoading();
   gameplayStart();
+  setTimeout(() => { perf.on = true; }, 2000);   // adaptive resolution starts once the first frames have settled
 })();

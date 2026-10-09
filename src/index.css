@@ -324,6 +324,23 @@ button.token:hover { transform: translateY(calc(-4 * var(--u))) scale(1.06); }
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition: none !important; }
 }
 
+/* phones: the fit-inside scale shrinks the HUD to ~37 % of the video, too small to read or tap.
+   Scale against a smaller reference instead (landscape ≈ +30 %, portrait limited by the width). */
+@media (pointer: coarse) and (max-height: 500px) and (orientation: landscape) {
+  :root { --u: max(0.36px, min(calc(100vh / 780), calc(100vw / 1450))); }
+  /* the rails lose a little of their desktop boost so they clear the cash counter and the JUMP button */
+  .hud-left { transform: translateY(-50%) scale(1.12); }
+  .hud-right { transform: translateY(-61%) scale(1.05); }
+  .touch-jump { width: clamp(64px, 10vw, 84px); bottom: max(calc(72 * var(--u)), env(safe-area-inset-bottom)); }   /* above the EVENT timer */
+}
+@media (pointer: coarse) and (max-width: 500px) and (orientation: portrait) {
+  :root { --u: max(0.36px, min(calc(100vh / 1006), calc(100vw / 840))); }
+  .btn--play { bottom: calc(max(24px, env(safe-area-inset-bottom)) + clamp(112px, 17vw, 150px) + 14px); }   /* above the joystick */
+}
+
+/* in a booth (waiting, playing, watching) you cannot walk, and the stick + JUMP would cover the ledge */
+body[data-match]:not([data-match="idle"]) .touch-controls { display: none; }
+
 /* phone landscape: keep tap targets ≥ 40px */
 @media (max-height: 500px) {
   .hud-tile, .btn--play { min-height: 40px; }
@@ -484,7 +501,16 @@ body[data-match="voting"] .hud-left, body[data-match="building"] .hud-left { dis
 .mm-troll__row { display: flex; gap: calc(16 * var(--u)); }
 
 /* top: "NAME's turn... 20s" */
-.mm-turn { left: 50%; top: calc(10 * var(--u)); transform: translateX(-50%); font: 900 calc(50 * var(--u)) / 1.1 var(--f-match); color: #fff; white-space: nowrap; }
+.mm-turn { left: 50%; top: calc(10 * var(--u)); transform: translateX(-50%); font: 900 calc(50 * var(--u)) / 1.1 var(--f-match); color: #fff; white-space: nowrap;
+  max-width: calc(100vw - 32px); overflow: hidden; text-overflow: ellipsis; }
+/* small screens: the profile chip shares the top edge with the turn line, so it steps aside during a match */
+@media (max-width: 1000px), (max-height: 500px) {
+  body[data-match="playing"] .hud-topright, body[data-match="watching"] .hud-topright { display: none; }
+}
+/* short landscape screens have no room above the Guess panel: REVEAL moves to the free top-right corner */
+@media (max-height: 500px) and (orientation: landscape) {
+  .mm-reveal { left: auto; right: max(16px, env(safe-area-inset-right)); top: calc(26 * var(--u)); transform: none; }
+}
 
 
 .mm-toast { left: 50%; top: 40%; transform: translateX(-50%); font: 900 calc(40 * var(--u)) / 1 var(--f-match); color: #fff; }
