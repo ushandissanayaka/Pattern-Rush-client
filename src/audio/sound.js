@@ -2,7 +2,7 @@
 // is synthesised ONCE on a background thread (audio/synth.worker.js) while the game loads. Playing a
 // sound later only starts a ready-made buffer on the browser's audio thread, so audio costs the
 // game loop next to nothing.
-const MUSIC_VOLUME = 0.32, SFX_VOLUME = 0.8;
+const MUSIC_VOLUME = 0.55, SFX_VOLUME = 0.8;
 const buffers = {};
 let ctx = null, sfxBus = null, musicBus = null, musicStarted = false, rendering = null;
 let muted = false;
@@ -41,7 +41,11 @@ function unlock() {
   sfxBus = ctx.createGain(); sfxBus.gain.value = SFX_VOLUME;
   musicBus = ctx.createGain(); musicBus.gain.value = 0;
   const master = ctx.createGain(); master.gain.value = muted ? 0 : masterLevel;
-  sfxBus.connect(master); musicBus.connect(master); master.connect(ctx.destination);
+  // limiter: louder music + a sound effect on top must not clip (crackle) on the output
+  const limiter = ctx.createDynamicsCompressor();
+  limiter.threshold.value = -3; limiter.knee.value = 0; limiter.ratio.value = 20;
+  limiter.attack.value = 0.003; limiter.release.value = 0.15;
+  sfxBus.connect(master); musicBus.connect(master); master.connect(limiter).connect(ctx.destination);
   ctx.master = master;
   ctx.resume?.();
   startMusic();
