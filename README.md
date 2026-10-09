@@ -20,7 +20,9 @@ On Boxity the client never opens its socket to `verity-quiz.host.bloxity.io`. Ev
 
 ## Deploy to Bloxity
 
-Build a ZIP for the channel you are uploading to:
+Pushes deploy automatically (`.github/workflows/deploy.yml`): `dev` → dev channel (`verity-quiz.dev.play.bloxity.io`), `main` → prod channel (`verity-quiz.play.bloxity.io`). The workflow needs the repository secret `LEGION_DEPLOY_TOKEN` (the hosting dashboard's deploy token) and the repository variable `LEGION_GAME_ID` = `verity-quiz`.
+
+To deploy by hand instead, build a ZIP for the channel you are uploading to:
 
 ```powershell
 npm run zip:dev    # release/pattern-rush-client-dev.zip  -> verity-quiz.dev.play.bloxity.io (dev backend)
